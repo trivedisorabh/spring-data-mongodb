@@ -33,7 +33,7 @@ import org.springframework.lang.Nullable;
  * @since 2.1
  * @see MessageProperties
  */
-interface Message<T> {
+interface Message<S, T> {
 
 	/**
 	 * The raw message source as emitted by the origin.
@@ -41,7 +41,14 @@ interface Message<T> {
 	 * @return can be {@literal null}.
 	 */
 	@Nullable
-	T getRaw();
+	S getRaw();
+
+	/**
+	 * message body
+	 * 
+	 * @return
+	 */
+	T getBody();
 
 	/**
 	 * {@link MessageProperties} containing information about the {@link Message} origin and other metadata.
@@ -49,22 +56,6 @@ interface Message<T> {
 	 * @return never {@literal null}
 	 */
 	MessageProperties getMessageProperties();
-
-	static <T> Message<T> simple(T raw, MessageProperties properties) {
-		return new SimpleMessage(raw, properties);
-	}
-
-	static <S, T> ConvertibleMessage<S, T> convertible(Message<S> message, MessageConverter converter) {
-		return new DelegatingConvertibleMessage(message, converter);
-	}
-
-	interface ConvertibleMessage<S, T> extends Message<S> {
-		T getConverted(Class<T> type);
-	}
-
-	static enum Type {
-		CHANGE_STREAM, TAILABLE_CURSOR, UNDEFINED
-	}
 
 	/**
 	 * @author Christoph Strobl
@@ -77,7 +68,6 @@ interface Message<T> {
 
 		private String databaseName;
 		private String collectionName;
-		private Type messageType = Type.UNDEFINED;
 
 		@Nullable
 		public String getDatabaseName() {
@@ -87,10 +77,6 @@ interface Message<T> {
 		@Nullable
 		public String getCollectionName() {
 			return collectionName;
-		}
-
-		public Type getMessageType() {
-			return messageType;
 		}
 
 		static MessageProperties empty() {
@@ -114,12 +100,7 @@ interface Message<T> {
 				properties.collectionName = collectionName;
 				return this;
 			}
-
-			MessagePropertiesBuilder messageType(Type messageType) {
-				properties.messageType = messageType;
-				return this;
-			}
-
+			
 			MessageProperties build() {
 
 				MessageProperties properties = this.properties;

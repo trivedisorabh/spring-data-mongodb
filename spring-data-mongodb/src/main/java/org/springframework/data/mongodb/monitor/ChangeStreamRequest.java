@@ -15,7 +15,10 @@
  */
 package org.springframework.data.mongodb.monitor;
 
+import java.util.Optional;
+
 import org.bson.Document;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.monitor.ChangeStreamRequest.ChangeStreamRequestOptions;
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
@@ -26,13 +29,13 @@ import com.mongodb.client.model.changestream.ChangeStreamDocument;
  * @author Christoph Strobl
  * @since 2.1
  */
-public class ChangeStreamRequest
-		implements SubscriptionRequest<Message<ChangeStreamDocument<Document>>, ChangeStreamRequestOptions> {
+public class ChangeStreamRequest<T>
+		implements SubscriptionRequest<Message<ChangeStreamDocument<Document>, T>, ChangeStreamRequestOptions> {
 
-	private final MessageListener<Message<ChangeStreamDocument<Document>>> messageListener;
+	private final MessageListener<Message<ChangeStreamDocument<Document>, T>> messageListener;
 	private final ChangeStreamRequestOptions options;
 
-	public ChangeStreamRequest(MessageListener<Message<ChangeStreamDocument<Document>>> messageListener,
+	public ChangeStreamRequest(MessageListener<Message<ChangeStreamDocument<Document>, T>> messageListener,
 			RequestOptions options) {
 
 		Assert.notNull(messageListener, "MessageListener must not be null!");
@@ -45,7 +48,7 @@ public class ChangeStreamRequest
 	}
 
 	@Override
-	public MessageListener<Message<ChangeStreamDocument<Document>>> getMessageListener() {
+	public MessageListener<Message<ChangeStreamDocument<Document>, T>> getMessageListener() {
 		return messageListener;
 	}
 
@@ -61,9 +64,9 @@ public class ChangeStreamRequest
 			implements org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions {
 
 		private String collectionName;
-		private @Nullable Document filter;
+		private @Nullable Class<?> domainType;
+		private @Nullable Aggregation filter;
 		private @Nullable Document resumeToken;
-		private @Nullable MessageConverter converter;
 
 		private ChangeStreamRequestOptions() {
 
@@ -78,17 +81,16 @@ public class ChangeStreamRequest
 			return collectionName;
 		}
 
-		public Document getFilter() {
-			return filter;
+		public Optional<Aggregation> getFilter() {
+			return Optional.ofNullable(filter);
 		}
 
-		public Document getResumeToken() {
-			return resumeToken;
+		public Optional<Document> getResumeToken() {
+			return Optional.ofNullable(resumeToken);
 		}
 
-		@Nullable
-		public MessageConverter getConverter() {
-			return converter;
+		public Optional<Class<?>> getDomainType() {
+			return Optional.ofNullable(domainType);
 		}
 
 		public static ChangeStreamRequestOptionsBuilder builder() {
@@ -104,7 +106,7 @@ public class ChangeStreamRequest
 				return this;
 			}
 
-			public ChangeStreamRequestOptionsBuilder collection(Document filter) {
+			public ChangeStreamRequestOptionsBuilder collection(Aggregation filter) {
 				options.filter = filter;
 				return this;
 			}
@@ -114,8 +116,8 @@ public class ChangeStreamRequest
 				return this;
 			}
 
-			public ChangeStreamRequestOptionsBuilder converter(MessageConverter converter) {
-				options.converter = converter;
+			public ChangeStreamRequestOptionsBuilder domainType(Class<?> domainType) {
+				options.domainType = domainType;
 				return this;
 			}
 

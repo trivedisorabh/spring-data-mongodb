@@ -16,6 +16,7 @@
 package org.springframework.data.mongodb.monitor;
 
 import org.springframework.context.SmartLifecycle;
+import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
 
 /**
  * Internal abstraction used by the framework representing a message listener container. <strong>Not</strong> meant to
@@ -43,7 +44,8 @@ interface MessageListenerContainer extends SmartLifecycle {
 	 * @param request must not be {@literal null}.
 	 * @return never {@literal null}.
 	 */
-	Subscription register(SubscriptionRequest request);
+	<T, M extends Message<?, ? super T>> Subscription register(SubscriptionRequest<M, ? extends RequestOptions> request,
+			Class<T> bodyType);
 
 	/**
 	 * Unregister a given {@link Subscription} from the container. This prevents the {@link Subscription} to be restarted

@@ -19,22 +19,23 @@ import lombok.Data;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 import org.bson.Document;
+import org.junit.AssumptionViolatedException;
 import org.junit.Before;
+import org.junit.ClassRule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
+import org.junit.runner.Description;
+import org.junit.runners.model.Statement;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.MongoDbFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoDbFactory;
-import org.springframework.data.mongodb.monitor.ChangeStreamRequest.ChangeStreamRequestOptions;
-import org.springframework.data.mongodb.monitor.Message.ConvertibleMessage;
 import org.springframework.data.mongodb.test.util.Assertions;
 
 import com.mongodb.MongoClient;
 import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.CreateCollectionOptions;
 
 /**
@@ -47,19 +48,45 @@ public class ChangeStreamTests {
 	MongoDbFactory dbFactory;
 
 	MongoCollection<Document> collection;
-	private MongoDatabase db;
 	private CollectingMessageListener messageListener;
+	private MongoTemplate template;
 
-	// TODO: add class rule verifying DB is running in replica set or a sharded cluster mode.
+	public static @ClassRule TestRule replSet = new TestRule() {
+
+		boolean replSet = false;
+
+		{
+			try (MongoClient client = new MongoClient()) {
+				replSet = client.getDatabase("admin").runCommand(new Document("getCmdLineOpts", "1")).get("argv", List.class)
+						.contains("--replSet");
+			}
+		}
+
+		@Override
+		public Statement apply(Statement base, Description description) {
+
+			return new Statement() {
+
+				@Override
+				public void evaluate() throws Throwable {
+
+					if (!replSet) {
+						throw new AssumptionViolatedException("Not runnig in repl set mode");
+					}
+					base.evaluate();
+				}
+			};
+		}
+	};
 
 	@Before
 	public void setUp() {
 
 		dbFactory = new SimpleMongoDbFactory(new MongoClient(), DATABASE_NAME);
-		db = dbFactory.getDb(DATABASE_NAME);
-		collection = db.getCollection(COLLECTION_NAME);
+		template = new MongoTemplate(dbFactory);
 
-		collection.drop();
+		template.dropCollection(COLLECTION_NAME);
+		collection = template.getCollection(COLLECTION_NAME);
 
 		messageListener = new CollectingMessageListener();
 	}
@@ -67,8 +94,8 @@ public class ChangeStreamTests {
 	@Test // DATAMONGO-1803
 	public void shouldOnlyReceiveMessagesWhileActive() throws InterruptedException {
 
-		MessageListenerContainer container = new DefaultMessageListenerContainer(dbFactory);
-		container.register(new ChangeStreamRequest(messageListener, () -> COLLECTION_NAME));
+		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
+		container.register(new ChangeStreamRequest(messageListener, () -> COLLECTION_NAME), Document.class);
 		container.start();
 
 		Thread.sleep(200);
@@ -90,13 +117,13 @@ public class ChangeStreamTests {
 	@Test // DATAMONGO-1803
 	public void mapping() throws InterruptedException {
 
-		MessageListenerContainer container = new DefaultMessageListenerContainer(dbFactory);
+		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
 
 		MongoTemplate template = new MongoTemplate(dbFactory);
 
 		// TODO: find a better way for messages and conversion.
-		container.register(new ChangeStreamRequest(messageListener, ChangeStreamRequestOptions.builder()
-				.collection(COLLECTION_NAME).converter(MessageConverter.mapping(template.getConverter())).build()));
+		container.register(new ChangeStreamRequest<Person>(message -> System.out.println("person: " + message.getBody()),
+				() -> COLLECTION_NAME), Person.class);
 		container.start();
 
 		Thread.sleep(200);
@@ -107,20 +134,14 @@ public class ChangeStreamTests {
 		Thread.sleep(200);
 
 		container.stop();
-
-		List<ConvertibleMessage> messages = (List<ConvertibleMessage>) messageListener.getMessages().stream()
-				.filter((val) -> val instanceof Message.ConvertibleMessage).map(ConvertibleMessage.class::cast)
-				.collect(Collectors.toList());
-
-		messages.forEach(val -> System.out.println(val.getConverted(Person.class)));
 	}
 
 	@Test
 	public void startAndListenToChangeStream() throws InterruptedException {
 
-		MessageListenerContainer container = new DefaultMessageListenerContainer(dbFactory);
+		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
 		container.start();
-		container.register(new ChangeStreamRequest(System.out::println, () -> COLLECTION_NAME));
+		container.register(new ChangeStreamRequest(System.out::println, () -> COLLECTION_NAME), Document.class);
 
 		Thread.sleep(200);
 
@@ -141,8 +162,8 @@ public class ChangeStreamTests {
 	@Test
 	public void startAndListenToChangeStreamOther() throws InterruptedException {
 
-		MessageListenerContainer container = new DefaultMessageListenerContainer(dbFactory);
-		container.register(new ChangeStreamRequest(System.out::println, () -> COLLECTION_NAME));
+		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
+		container.register(new ChangeStreamRequest(System.out::println, () -> COLLECTION_NAME), Document.class);
 
 		collection.insertOne(new Document("_id", "id-1").append("value", "foo"));
 
@@ -167,8 +188,8 @@ public class ChangeStreamTests {
 		dbFactory.getDb().createCollection(COLLECTION_NAME,
 				new CreateCollectionOptions().capped(true).maxDocuments(10000).sizeInBytes(10000));
 
-		MessageListenerContainer container = new DefaultMessageListenerContainer(dbFactory);
-		container.register(new TailableCursorRequest(System.out::println, () -> COLLECTION_NAME));
+		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
+		container.register(new TailableCursorRequest(System.out::println, () -> COLLECTION_NAME), Document.class);
 
 		collection.insertOne(new Document("_id", "id-1").append("value", "foo"));
 

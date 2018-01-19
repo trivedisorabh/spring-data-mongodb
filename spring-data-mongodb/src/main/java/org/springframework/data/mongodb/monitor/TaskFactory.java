@@ -15,13 +15,20 @@
  */
 package org.springframework.data.mongodb.monitor;
 
+import java.util.Collections;
+import java.util.List;
+
 import org.bson.Document;
 import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.data.mongodb.MongoDbFactory;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.convert.MongoConverter;
 import org.springframework.data.mongodb.monitor.ChangeStreamRequest.ChangeStreamRequestOptions;
 import org.springframework.data.mongodb.monitor.Message.MessageProperties;
 import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
+import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
+import org.springframework.util.ClassUtils;
 
 import com.mongodb.CursorType;
 import com.mongodb.client.MongoCursor;
@@ -35,10 +42,10 @@ import com.mongodb.client.model.changestream.ChangeStreamDocument;
  */
 class TaskFactory {
 
-	private final MongoDbFactory dbFactory;
+	private final MongoTemplate tempate;
 
-	public TaskFactory(MongoDbFactory dbFactory) {
-		this.dbFactory = dbFactory;
+	public TaskFactory(MongoTemplate template) {
+		this.tempate = template;
 	}
 
 	/**
@@ -48,14 +55,14 @@ class TaskFactory {
 	 * @return must not be {@literal null}.
 	 * @throws IllegalArgumentException in case the {@link SubscriptionRequest} is unknown.
 	 */
-	Task forRequest(SubscriptionRequest<?, ?> request) {
+	Task forRequest(SubscriptionRequest<?, ?> request, Class<?> targetType) {
 
 		Assert.notNull(request, "Request must not be null!");
 
 		if (request instanceof ChangeStreamRequest) {
-			return new ChangeStreamTask(dbFactory, (ChangeStreamRequest) request);
+			return new ChangeStreamTask(tempate, (ChangeStreamRequest) request, targetType);
 		} else if (request instanceof TailableCursorRequest) {
-			return new TailableCursorTask(dbFactory, (TailableCursorRequest) request);
+			return new TailableCursorTask(tempate, (TailableCursorRequest) request, targetType);
 		}
 
 		throw new IllegalArgumentException(
@@ -71,16 +78,18 @@ class TaskFactory {
 		private final Object lifecycleMonitor = new Object();
 
 		private final SubscriptionRequest request;
-		private final MongoDbFactory factory;
+		private final MongoTemplate template;
+		private final Class<?> targetType;
 
 		private State state = State.CREATED;
 
 		private MongoCursor<T> cursor;
 
-		public CursorReadingTask(MongoDbFactory factory, SubscriptionRequest request) {
+		public CursorReadingTask(MongoTemplate template, SubscriptionRequest request, Class<?> targetType) {
 
-			this.factory = factory;
+			this.template = template;
 			this.request = request;
+			this.targetType = targetType;
 		}
 
 		@Override
@@ -89,24 +98,29 @@ class TaskFactory {
 			synchronized (lifecycleMonitor) {
 
 				if (!State.ACTIVE.equals(state)) {
-					cursor = initCursor(factory, request.getRequestOptions());
+					cursor = initCursor(template, request.getRequestOptions());
 					state = State.ACTIVE;
 				}
 			}
 
 			while (State.ACTIVE.equals(state)) {
 				try {
-					request.getMessageListener().onMessage(createMessage(cursor.next(), request.getRequestOptions()));
+					request.getMessageListener().onMessage(createMessage(cursor.next(), targetType, request.getRequestOptions()));
 				} catch (IllegalStateException e) {
 					System.out.println("damnit error in close : " + e.getMessage());
 				}
 			}
 		}
 
-		protected abstract MongoCursor<T> initCursor(MongoDbFactory dbFactory, RequestOptions options);
+		protected abstract MongoCursor<T> initCursor(MongoTemplate dbFactory, RequestOptions options);
 
-		protected Message createMessage(T source, RequestOptions options) {
-			return Message.simple(source, MessageProperties.builder().collectionName(options.getCollectionName()).build());
+		private Message createMessage(T source, Class targetType, RequestOptions options) {
+			return new LazyMappingDelegatingMessage(doCreateMessage(source, options), targetType, template.getConverter());
+		}
+
+		protected Message doCreateMessage(T source, RequestOptions options) {
+			return new SimpleMessage(source, source,
+					MessageProperties.builder().collectionName(options.getCollectionName()).build());
 		}
 
 		@Override
@@ -146,30 +160,38 @@ class TaskFactory {
 	 */
 	private static class ChangeStreamTask extends CursorReadingTask<ChangeStreamDocument<Document>> {
 
-		ChangeStreamTask(MongoDbFactory factory, ChangeStreamRequest request) {
-			super(factory, request);
+		ChangeStreamTask(MongoTemplate template, ChangeStreamRequest request, Class<?> targetType) {
+			super(template, request, targetType);
 		}
 
 		@Override
-		protected MongoCursor<ChangeStreamDocument<Document>> initCursor(MongoDbFactory dbFactory, RequestOptions options) {
-			return dbFactory.getDb().getCollection(options.getCollectionName()).watch(Document.class).iterator();
-		}
+		protected MongoCursor<ChangeStreamDocument<Document>> initCursor(MongoTemplate template, RequestOptions options) {
 
-		@Override
-		protected Message createMessage(ChangeStreamDocument<Document> source, RequestOptions options) {
-
-			Message message = super.createMessage(source, options);
-
+			List<Document> filter = Collections.emptyList();
 			if (options instanceof ChangeStreamRequestOptions) {
 
 				ChangeStreamRequestOptions csro = (ChangeStreamRequestOptions) options;
-				if (csro.getConverter() != null) {
-					message = Message.convertible(message, csro.getConverter());
-				}
+
+				// TODO: mapping and correct context usage
+				filter = (List<Document>) csro.getFilter()
+						.map(agg -> agg.toDocument("tmp", Aggregation.DEFAULT_CONTEXT).get("pipeline"))
+						.orElse(Collections.emptyList());
+
 			}
 
-			return message;
+			if (filter.isEmpty()) {
+				return template.getCollection(options.getCollectionName()).watch(Document.class).iterator();
+			} else {
+				return template.getCollection(options.getCollectionName()).watch(filter, Document.class).iterator();
+			}
 		}
+
+		@Override
+		protected Message doCreateMessage(ChangeStreamDocument<Document> source, RequestOptions options) {
+			return new SimpleMessage(source, source.getFullDocument(),
+					MessageProperties.builder().collectionName(options.getCollectionName()).build());
+		}
+
 	}
 
 	/**
@@ -178,15 +200,60 @@ class TaskFactory {
 	 */
 	private static class TailableCursorTask extends CursorReadingTask<Document> {
 
-		public TailableCursorTask(MongoDbFactory factory, TailableCursorRequest request) {
-			super(factory, request);
+		public TailableCursorTask(MongoTemplate template, TailableCursorRequest request, Class<?> targetType) {
+			super(template, request, targetType);
 		}
 
 		@Override
-		protected MongoCursor<Document> initCursor(MongoDbFactory dbFactory, RequestOptions options) {
+		protected MongoCursor<Document> initCursor(MongoTemplate template, RequestOptions options) {
+			return template.getCollection(options.getCollectionName()).find().cursorType(CursorType.TailableAwait).iterator();
+		}
 
-			return dbFactory.getDb().getCollection(options.getCollectionName()).find().cursorType(CursorType.TailableAwait)
-					.iterator();
+	}
+
+	static class LazyMappingDelegatingMessage<S, T> implements Message<S, T> {
+
+		private final Message<S, ?> delegate;
+		private final Class<T> targetType;
+		private final MongoConverter converter;
+
+		public LazyMappingDelegatingMessage(Message<S, ?> delegate, Class<T> targetType, MongoConverter converter) {
+
+			this.delegate = delegate;
+			this.targetType = targetType;
+			this.converter = converter;
+		}
+
+		@Nullable
+		@Override
+		public S getRaw() {
+			return delegate.getRaw();
+		}
+
+		@Override
+		public T getBody() {
+
+			if (delegate.getBody() == null || targetType.equals(delegate.getBody().getClass())) {
+				return targetType.cast(delegate.getBody());
+			}
+
+			Object messageBody = delegate.getBody();
+
+			if (ClassUtils.isAssignable(Document.class, messageBody.getClass())) {
+				return converter.read(targetType, (Document) messageBody);
+			}
+
+			if (converter.getConversionService().canConvert(messageBody.getClass(), targetType)) {
+				return converter.getConversionService().convert(messageBody, targetType);
+			}
+
+			throw new IllegalArgumentException(
+					String.format("No converter found capable of converting %s to %s", messageBody.getClass(), targetType));
+		}
+
+		@Override
+		public MessageProperties getMessageProperties() {
+			return delegate.getMessageProperties();
 		}
 	}
 }

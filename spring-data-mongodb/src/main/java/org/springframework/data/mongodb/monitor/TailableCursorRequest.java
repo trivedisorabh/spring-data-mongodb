@@ -15,24 +15,25 @@
  */
 package org.springframework.data.mongodb.monitor;
 
+import org.bson.Document;
 import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
 
 /**
  * @author Christoph Strobl
  * @since 2.1
  */
-public class TailableCursorRequest implements SubscriptionRequest<Message, RequestOptions> {
+public class TailableCursorRequest<T> implements SubscriptionRequest<Message<Document, T>, RequestOptions> {
 
-	private MessageListener<Message> messageListener;
+	private MessageListener<Message<Document, T>> messageListener;
 	private RequestOptions options;
 
-	public TailableCursorRequest(MessageListener<Message> messageListener, RequestOptions options) {
+	public TailableCursorRequest(MessageListener<Message<Document, T>> messageListener, RequestOptions options) {
 		this.messageListener = messageListener;
 		this.options = options;
 	}
 
 	@Override
-	public MessageListener<Message> getMessageListener() {
+	public MessageListener<Message<Document, T>> getMessageListener() {
 		return messageListener;
 	}
 

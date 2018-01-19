@@ -23,7 +23,8 @@ import java.util.concurrent.Executor;
 
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.data.mongodb.MongoDbFactory;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
 import org.springframework.util.Assert;
 
 /**
@@ -34,7 +35,7 @@ import org.springframework.util.Assert;
  */
 class DefaultMessageListenerContainer implements MessageListenerContainer {
 
-	private final MongoDbFactory dbFactory;
+	private final MongoTemplate template;
 	private final Executor taskExecutor;
 
 	private final Object lifecycleMonitor = new Object();
@@ -45,18 +46,18 @@ class DefaultMessageListenerContainer implements MessageListenerContainer {
 	private volatile Set<Subscription> subscriptions = new CopyOnWriteArraySet<>();
 	private final TaskFactory taskFactory;
 
-	DefaultMessageListenerContainer(MongoDbFactory dbFactory) {
-		this(dbFactory, new SimpleAsyncTaskExecutor());
+	DefaultMessageListenerContainer(MongoTemplate template) {
+		this(template, new SimpleAsyncTaskExecutor());
 	}
 
-	DefaultMessageListenerContainer(MongoDbFactory dbFactory, Executor taskExecutor) {
+	DefaultMessageListenerContainer(MongoTemplate template, Executor taskExecutor) {
 
-		Assert.notNull(dbFactory, "DbFactory must not be null!");
+		Assert.notNull(template, "Template must not be null!");
 		Assert.notNull(taskExecutor, "TaskExecutor must not be null!");
 
 		this.taskExecutor = taskExecutor;
-		this.dbFactory = dbFactory;
-		this.taskFactory = new TaskFactory(dbFactory);
+		this.template = template;
+		this.taskFactory = new TaskFactory(template);
 	}
 
 	@Override
@@ -121,9 +122,10 @@ class DefaultMessageListenerContainer implements MessageListenerContainer {
 	}
 
 	@Override
-	public Subscription register(SubscriptionRequest request) {
+	public <T, M extends Message<?, ? super T>> Subscription register(SubscriptionRequest<M, ? extends RequestOptions> request,
+			Class<T> bodyType) {
 
-		Task task = taskFactory.forRequest(request);
+		Task task = taskFactory.forRequest(request, bodyType);
 		Subscription subscription = new TaskSubscription(task);
 
 		synchronized (lifecycleMonitor) {

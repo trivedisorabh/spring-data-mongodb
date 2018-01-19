@@ -27,21 +27,28 @@ import org.springframework.util.Assert;
  */
 @EqualsAndHashCode
 @ToString
-class SimpleMessage<T> implements Message<T> {
+class SimpleMessage<S, T> implements Message<S, T> {
 
-	private @Nullable final T raw;
+	private @Nullable final S raw;
+	private @Nullable final T body;
 	private final MessageProperties properties;
 
-	SimpleMessage(@Nullable T raw, MessageProperties properties) {
+	SimpleMessage(@Nullable S raw, @Nullable T body, MessageProperties properties) {
 
 		Assert.notNull(properties, "Properties must not be null! Use MessageProperties.empty() instead.");
 		this.raw = raw;
+		this.body = body;
 		this.properties = properties;
 	}
 
 	@Override
-	public T getRaw() {
+	public S getRaw() {
 		return raw;
+	}
+
+	@Override
+	public T getBody() {
+		return body;
 	}
 
 	@Override
