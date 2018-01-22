@@ -27,7 +27,6 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
 
 /**
  * Unit tests for {@link DefaultMessageListenerContainer}.
@@ -86,8 +85,7 @@ public class DefaultMessageListenerContainerUnitTests {
 		public void thread2() throws InterruptedException {
 
 			waitForTick(1);
-			MockTaskSubscriptionRequest request = new MockTaskSubscriptionRequest();
-			Subscription subscription = container.register(request, Object.class);
+			Subscription subscription = container.register(new MockTask());
 			Thread.sleep(10);
 			assertThat(subscription.isActive()).isTrue();
 
@@ -109,8 +107,7 @@ public class DefaultMessageListenerContainerUnitTests {
 
 			assertTick(0);
 
-			MockTaskSubscriptionRequest request = new MockTaskSubscriptionRequest();
-			Subscription subscription = container.register(request, Object.class);
+			Subscription subscription = container.register(new MockTask());
 			assertThat(subscription.isActive()).isFalse();
 
 			waitForTick(2);
@@ -155,50 +152,28 @@ public class DefaultMessageListenerContainerUnitTests {
 		}
 	}
 
-	static class MockTaskSubscriptionRequest implements TaskSubscriptionRequest<Message, RequestOptions> {
+	static class MockTask implements Task {
 
-		Task task;
+		boolean active;
 
-		public MockTaskSubscriptionRequest() {
-			task = new Task() {
-
-				boolean active;
-
-				@Override
-				public boolean isActive() {
-					return active;
-				}
-
-				@Override
-				public void cancel() throws DataAccessResourceFailureException {
-					active = false;
-				}
-
-				@Override
-				public boolean isLongLived() {
-					return true;
-				}
-
-				@Override
-				public void run() {
-					active = true;
-				}
-			};
+		@Override
+		public boolean isActive() {
+			return active;
 		}
 
 		@Override
-		public Task getTask() {
-			return task;
+		public void cancel() throws DataAccessResourceFailureException {
+			active = false;
 		}
 
 		@Override
-		public MessageListener<Message> getMessageListener() {
-			return m -> {};
+		public boolean isLongLived() {
+			return true;
 		}
 
 		@Override
-		public RequestOptions getRequestOptions() {
-			return () -> "collection-1";
+		public void run() {
+			active = true;
 		}
 	}
 }

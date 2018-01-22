@@ -64,7 +64,6 @@ public class ChangeStreamRequest<T>
 			implements org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions {
 
 		private String collectionName;
-		private @Nullable Class<?> domainType;
 		private @Nullable Aggregation filter;
 		private @Nullable Document resumeToken;
 
@@ -89,10 +88,6 @@ public class ChangeStreamRequest<T>
 			return Optional.ofNullable(resumeToken);
 		}
 
-		public Optional<Class<?>> getDomainType() {
-			return Optional.ofNullable(domainType);
-		}
-
 		public static ChangeStreamRequestOptionsBuilder builder() {
 			return new ChangeStreamRequestOptionsBuilder();
 		}
@@ -113,11 +108,6 @@ public class ChangeStreamRequest<T>
 
 			public ChangeStreamRequestOptionsBuilder resumeToken(Document resumeToken) {
 				options.resumeToken = resumeToken;
-				return this;
-			}
-
-			public ChangeStreamRequestOptionsBuilder domainType(Class<?> domainType) {
-				options.domainType = domainType;
 				return this;
 			}
 

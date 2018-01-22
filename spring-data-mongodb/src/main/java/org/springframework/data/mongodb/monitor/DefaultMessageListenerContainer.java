@@ -122,10 +122,14 @@ class DefaultMessageListenerContainer implements MessageListenerContainer {
 	}
 
 	@Override
-	public <T, M extends Message<?, ? super T>> Subscription register(SubscriptionRequest<M, ? extends RequestOptions> request,
-			Class<T> bodyType) {
+	public <T, M extends Message<?, ? super T>> Subscription register(
+			SubscriptionRequest<M, ? extends RequestOptions> request, Class<T> bodyType) {
 
-		Task task = taskFactory.forRequest(request, bodyType);
+		return register(taskFactory.forRequest(request, bodyType));
+	}
+
+	public Subscription register(Task task) {
+
 		Subscription subscription = new TaskSubscription(task);
 
 		synchronized (lifecycleMonitor) {

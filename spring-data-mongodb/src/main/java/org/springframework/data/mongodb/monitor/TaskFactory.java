@@ -23,7 +23,11 @@ import org.bson.Document;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationOperationContext;
+import org.springframework.data.mongodb.core.aggregation.TypeBasedAggregationOperationContext;
+import org.springframework.data.mongodb.core.aggregation.TypedAggregation;
 import org.springframework.data.mongodb.core.convert.MongoConverter;
+import org.springframework.data.mongodb.core.convert.QueryMapper;
 import org.springframework.data.mongodb.monitor.ChangeStreamRequest.ChangeStreamRequestOptions;
 import org.springframework.data.mongodb.monitor.Message.MessageProperties;
 import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
@@ -54,16 +58,14 @@ class TaskFactory {
 	 * Create a {@link Task} for the given {@link SubscriptionRequest}.
 	 *
 	 * @param request must not be {@literal null}.
-	 * @return must not be {@literal null}.
+	 * @return must not be {@literal null}. Consider {@code Object.class}.
 	 * @throws IllegalArgumentException in case the {@link SubscriptionRequest} is unknown.
 	 */
 	Task forRequest(SubscriptionRequest<?, ?> request, Class<?> targetType) {
 
 		Assert.notNull(request, "Request must not be null!");
+		Assert.notNull(targetType, "TargetType must not be null!");
 
-		if (request instanceof TaskSubscriptionRequest) {
-			return ((TaskSubscriptionRequest) request).getTask();
-		}
 		if (request instanceof ChangeStreamRequest) {
 			return new ChangeStreamTask(tempate, (ChangeStreamRequest) request, targetType);
 		} else if (request instanceof TailableCursorRequest) {
@@ -78,7 +80,7 @@ class TaskFactory {
 	 * @author Christoph Strobl
 	 * @since 2.1
 	 */
-	private abstract static class CursorReadingTask<T> implements Task {
+	abstract static class CursorReadingTask<T> implements Task {
 
 		private final Object lifecycleMonitor = new Object();
 
@@ -110,7 +112,10 @@ class TaskFactory {
 
 			while (State.ACTIVE.equals(state)) {
 				try {
-					request.getMessageListener().onMessage(createMessage(cursor.next(), targetType, request.getRequestOptions()));
+					if (cursor.hasNext()) {
+						request.getMessageListener()
+								.onMessage(createMessage(cursor.next(), targetType, request.getRequestOptions()));
+					}
 				} catch (IllegalStateException e) {
 					System.out.println("damnit error in close : " + e.getMessage());
 				}
@@ -163,38 +168,57 @@ class TaskFactory {
 	 * @author Christoph Strobl
 	 * @since 2.1
 	 */
-	private static class ChangeStreamTask extends CursorReadingTask<ChangeStreamDocument<Document>> {
+	static class ChangeStreamTask extends CursorReadingTask<ChangeStreamDocument<Document>> {
+
+		private final QueryMapper queryMapper;
 
 		ChangeStreamTask(MongoTemplate template, ChangeStreamRequest request, Class<?> targetType) {
 			super(template, request, targetType);
+
+			queryMapper = new QueryMapper(template.getConverter());
 		}
 
 		@Override
 		protected MongoCursor<ChangeStreamDocument<Document>> initCursor(MongoTemplate template, RequestOptions options) {
 
 			List<Document> filter = Collections.emptyList();
+			BsonDocument resumeToken = new BsonDocument();
+
 			if (options instanceof ChangeStreamRequestOptions) {
 
-				ChangeStreamRequestOptions csro = (ChangeStreamRequestOptions) options;
+				ChangeStreamRequestOptions changeStreamRequestOptions = (ChangeStreamRequestOptions) options;
+				filter = prepareFilter(template, changeStreamRequestOptions);
 
-				// TODO: mapping and correct context usage
-				filter = (List<Document>) csro.getFilter()
-
-						// TODO extract to method and apply collation from AggregationOptions.
-						.map(agg -> agg.toDocument("tmp", Aggregation.DEFAULT_CONTEXT).get("pipeline"))
-						.orElse(Collections.emptyList());
+				if (changeStreamRequestOptions.getResumeToken().isPresent()) {
+					resumeToken = BsonDocument.parse(changeStreamRequestOptions.getResumeToken().get().toJson());
+				}
 			}
 
 			ChangeStreamIterable<Document> iterable = filter.isEmpty()
 					? template.getCollection(options.getCollectionName()).watch(Document.class)
 					: template.getCollection(options.getCollectionName()).watch(filter, Document.class);
 
-			ChangeStreamRequestOptions csro = (ChangeStreamRequestOptions) options;
-			if (csro.getResumeToken().isPresent()) {
-				iterable = iterable.resumeAfter(BsonDocument.parse(csro.getResumeToken().get().toJson()));
+			if (!resumeToken.isEmpty()) {
+				iterable = iterable.resumeAfter(resumeToken);
 			}
 
 			return iterable.iterator();
+		}
+
+		List<Document> prepareFilter(MongoTemplate template, ChangeStreamRequestOptions options) {
+
+			if (options.getFilter().isPresent()) {
+
+				Aggregation agg = options.getFilter().get();
+				AggregationOperationContext context = agg instanceof TypedAggregation
+						? new TypeBasedAggregationOperationContext(((TypedAggregation) agg).getInputType(),
+								template.getConverter().getMappingContext(), queryMapper)
+						: Aggregation.DEFAULT_CONTEXT;
+
+				return agg.toPipeline(context);
+			}
+
+			return Collections.emptyList();
 		}
 
 		@Override
@@ -202,14 +226,13 @@ class TaskFactory {
 			return new SimpleMessage(source, source.getFullDocument(),
 					MessageProperties.builder().collectionName(options.getCollectionName()).build());
 		}
-
 	}
 
 	/**
 	 * @author Christoph Strobl
 	 * @since 2.1
 	 */
-	private static class TailableCursorTask extends CursorReadingTask<Document> {
+	static class TailableCursorTask extends CursorReadingTask<Document> {
 
 		public TailableCursorTask(MongoTemplate template, TailableCursorRequest request, Class<?> targetType) {
 			super(template, request, targetType);
@@ -217,7 +240,8 @@ class TaskFactory {
 
 		@Override
 		protected MongoCursor<Document> initCursor(MongoTemplate template, RequestOptions options) {
-			return template.getCollection(options.getCollectionName()).find().cursorType(CursorType.TailableAwait).iterator();
+			return template.getCollection(options.getCollectionName()).find().cursorType(CursorType.TailableAwait)
+					.noCursorTimeout(true).iterator();
 		}
 
 	}

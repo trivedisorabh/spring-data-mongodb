@@ -15,10 +15,14 @@
  */
 package org.springframework.data.mongodb.monitor;
 
+import static org.assertj.core.api.Assertions.*;
+
 import lombok.Data;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.bson.Document;
 import org.junit.Before;
@@ -29,7 +33,6 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.MongoDbFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoDbFactory;
-import org.springframework.data.mongodb.test.util.Assertions;
 import org.springframework.data.mongodb.test.util.ReplicaSet;
 import org.springframework.test.annotation.IfProfileValue;
 
@@ -38,6 +41,8 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.CreateCollectionOptions;
 
 /**
+ * Integration tests for {@link DefaultMessageListenerContainer}.
+ *
  * @author Christoph Strobl
  */
 public class DefaultMessageListenerContainerTests {
@@ -47,7 +52,7 @@ public class DefaultMessageListenerContainerTests {
 	MongoDbFactory dbFactory;
 
 	MongoCollection<Document> collection;
-	private CollectingMessageListener messageListener;
+	private CollectingMessageListener<Message> messageListener;
 	private MongoTemplate template;
 
 	public @Rule TestRule replSet = ReplicaSet.none();
@@ -66,73 +71,73 @@ public class DefaultMessageListenerContainerTests {
 
 	@Test // DATAMONGO-1803
 	@IfProfileValue(name = "replSet", value = "true")
-	public void shouldOnlyReceiveMessagesWhileActive() throws InterruptedException {
+	public void shouldCollectMappedChangeStreamMessagesCorrectly() throws InterruptedException {
 
 		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
-		container.register(new ChangeStreamRequest(messageListener, () -> COLLECTION_NAME), Document.class);
+		Subscription subscription = container.register(new ChangeStreamRequest(messageListener, () -> COLLECTION_NAME),
+				Person.class);
 		container.start();
 
-		Thread.sleep(200);
-
-		collection.insertOne(new Document("_id", "id-1").append("value", "foo"));
-		collection.insertOne(new Document("_id", "id-2").append("value", "bar"));
-
-		Thread.sleep(200);
-
-		container.stop();
-
-		collection.insertOne(new Document("_id", "id-3").append("value", "bar"));
-
-		Thread.sleep(200);
-
-		Assertions.assertThat(messageListener.getTotalNumberMessagesReceived()).isEqualTo(2);
-	}
-
-	@Test // DATAMONGO-1803
-	@IfProfileValue(name = "replSet", value = "true")
-	public void mapping() throws InterruptedException {
-
-		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
-
-		MongoTemplate template = new MongoTemplate(dbFactory);
-
-		// TODO: find a better way for messages and conversion.
-		container.register(new ChangeStreamRequest<Person>(message -> System.out.println("person: " + message.getBody()),
-				() -> COLLECTION_NAME), Person.class);
-		container.start();
-
-		Thread.sleep(200);
+		awaitSubscription(subscription, Duration.ofMillis(500));
 
 		collection.insertOne(new Document("_id", "id-1").append("firstname", "foo"));
-		collection.insertOne(new Document("_id", "id-2").append("lastname", "bar"));
+		collection.insertOne(new Document("_id", "id-2").append("firstname", "bar"));
 
-		Thread.sleep(200);
+		awaitMessages(2, Duration.ofMillis(500));
 
-		container.stop();
+		assertThat(messageListener.getMessages().stream().map(Message::getBody).collect(Collectors.toList()))
+				.containsExactly(new Person("id-1", "foo"), new Person("id-2", "bar"));
+
 	}
 
 	@Test // DATAMONGO-1803
 	@IfProfileValue(name = "replSet", value = "true")
-	public void startAndListenToChangeStream() throws InterruptedException {
+	public void shouldNoLongerReceiveMessagesWhenConainerStopped() throws InterruptedException {
 
 		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
+		Subscription subscription = container.register(new ChangeStreamRequest(messageListener, () -> COLLECTION_NAME),
+				Document.class);
 		container.start();
-		container.register(new ChangeStreamRequest(System.out::println, () -> COLLECTION_NAME), Document.class);
 
-		Thread.sleep(200);
+		awaitSubscription(subscription, Duration.ofMillis(500));
 
 		collection.insertOne(new Document("_id", "id-1").append("value", "foo"));
-
-		Thread.sleep(1000);
 		collection.insertOne(new Document("_id", "id-2").append("value", "bar"));
 
-		Thread.sleep(1000);
+		awaitMessages(2, Duration.ofMillis(500));
+
 		container.stop();
 
 		collection.insertOne(new Document("_id", "id-3").append("value", "bar"));
-		Thread.sleep(2000);
-		collection.insertOne(new Document("_id", "id-4").append("value", "bar"));
-		Thread.sleep(2000);
+
+		Thread.sleep(200);
+
+		assertThat(messageListener.getTotalNumberMessagesReceived()).isEqualTo(2);
+	}
+
+	@Test // DATAMONGO-1803
+	@IfProfileValue(name = "replSet", value = "true")
+	public void shouldReceiveMessagesWhenAddingRequestToAlreadyStartedContainer() throws InterruptedException {
+
+		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
+		container.start();
+
+		Document unexpected = new Document("_id", "id-1").append("value", "foo");
+		collection.insertOne(unexpected);
+
+		Subscription subscription = container.register(new ChangeStreamRequest(messageListener, () -> COLLECTION_NAME),
+				Document.class);
+
+		awaitSubscription(subscription, Duration.ofMillis(500));
+
+		Document expected = new Document("_id", "id-2").append("value", "bar");
+		collection.insertOne(expected);
+
+		awaitMessages(1, Duration.ofMillis(500));
+		container.stop();
+
+		assertThat(messageListener.getMessages().stream().map(Message::getBody).collect(Collectors.toList()))
+				.containsExactly(expected);
 	}
 
 	@Test // DATAMONGO-1803
@@ -165,29 +170,28 @@ public class DefaultMessageListenerContainerTests {
 		dbFactory.getDb().createCollection(COLLECTION_NAME,
 				new CreateCollectionOptions().capped(true).maxDocuments(10000).sizeInBytes(10000));
 
-		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
-		container.register(new TailableCursorRequest(System.out::println, () -> COLLECTION_NAME), Document.class);
-
+		// TODO: we actually need to find a way messages get processed correctly even when there's no data avialable when
+		// starting the task
 		collection.insertOne(new Document("_id", "id-1").append("value", "foo"));
 
-		Thread.sleep(1000);
-
+		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
 		container.start();
 
-		Thread.sleep(500);
+		awaitSubscription(
+				container.register(new TailableCursorRequest(messageListener, () -> COLLECTION_NAME), Document.class),
+				Duration.ofMillis(500));
 
 		collection.insertOne(new Document("_id", "id-2").append("value", "bar"));
 
-		Thread.sleep(1000);
+		awaitMessages(2, Duration.ofSeconds(2));
 		container.stop();
 
-		collection.insertOne(new Document("_id", "id-3").append("value", "bar"));
-		Thread.sleep(2000);
+		assertThat(messageListener.getTotalNumberMessagesReceived()).isEqualTo(2);
 	}
 
 	static class CollectingMessageListener<M extends Message> implements MessageListener<M> {
 
-		List<M> messages = new ArrayList<>();
+		volatile List<M> messages = new ArrayList<>();
 
 		@Override
 		public void onMessage(M message) {
@@ -208,5 +212,32 @@ public class DefaultMessageListenerContainerTests {
 		@Id String id;
 		private String firstname;
 		private String lastname;
+
+		public Person() {}
+
+		public Person(String id, String firstname) {
+			this.id = id;
+			this.firstname = firstname;
+		}
+	}
+
+	private void awaitSubscription(Subscription subscription, Duration max) throws InterruptedException {
+
+		long passedMs = 0;
+		long maxMs = max.toMillis();
+		while (!subscription.isActive() && passedMs < maxMs) {
+			Thread.sleep(10);
+			passedMs += 10;
+		}
+	}
+
+	private void awaitMessages(int nrMessages, Duration max) throws InterruptedException {
+
+		long passedMs = 0;
+		long maxMs = max.toMillis();
+		while (messageListener.getTotalNumberMessagesReceived() < nrMessages && passedMs < maxMs) {
+			Thread.sleep(10);
+			passedMs += 10;
+		}
 	}
 }
