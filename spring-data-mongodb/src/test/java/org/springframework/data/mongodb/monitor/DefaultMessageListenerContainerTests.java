@@ -21,18 +21,17 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.bson.Document;
-import org.junit.AssumptionViolatedException;
 import org.junit.Before;
-import org.junit.ClassRule;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TestRule;
-import org.junit.runner.Description;
-import org.junit.runners.model.Statement;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.MongoDbFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoDbFactory;
 import org.springframework.data.mongodb.test.util.Assertions;
+import org.springframework.data.mongodb.test.util.ReplicaSet;
+import org.springframework.test.annotation.IfProfileValue;
 
 import com.mongodb.MongoClient;
 import com.mongodb.client.MongoCollection;
@@ -41,7 +40,7 @@ import com.mongodb.client.model.CreateCollectionOptions;
 /**
  * @author Christoph Strobl
  */
-public class ChangeStreamTests {
+public class DefaultMessageListenerContainerTests {
 
 	public static final String DATABASE_NAME = "change-stream-events";
 	public static final String COLLECTION_NAME = "collection-1";
@@ -51,33 +50,7 @@ public class ChangeStreamTests {
 	private CollectingMessageListener messageListener;
 	private MongoTemplate template;
 
-	public static @ClassRule TestRule replSet = new TestRule() {
-
-		boolean replSet = false;
-
-		{
-			try (MongoClient client = new MongoClient()) {
-				replSet = client.getDatabase("admin").runCommand(new Document("getCmdLineOpts", "1")).get("argv", List.class)
-						.contains("--replSet");
-			}
-		}
-
-		@Override
-		public Statement apply(Statement base, Description description) {
-
-			return new Statement() {
-
-				@Override
-				public void evaluate() throws Throwable {
-
-					if (!replSet) {
-						throw new AssumptionViolatedException("Not runnig in repl set mode");
-					}
-					base.evaluate();
-				}
-			};
-		}
-	};
+	public @Rule TestRule replSet = ReplicaSet.none();
 
 	@Before
 	public void setUp() {
@@ -92,6 +65,7 @@ public class ChangeStreamTests {
 	}
 
 	@Test // DATAMONGO-1803
+	@IfProfileValue(name = "replSet", value = "true")
 	public void shouldOnlyReceiveMessagesWhileActive() throws InterruptedException {
 
 		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
@@ -115,6 +89,7 @@ public class ChangeStreamTests {
 	}
 
 	@Test // DATAMONGO-1803
+	@IfProfileValue(name = "replSet", value = "true")
 	public void mapping() throws InterruptedException {
 
 		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
@@ -136,7 +111,8 @@ public class ChangeStreamTests {
 		container.stop();
 	}
 
-	@Test
+	@Test // DATAMONGO-1803
+	@IfProfileValue(name = "replSet", value = "true")
 	public void startAndListenToChangeStream() throws InterruptedException {
 
 		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
@@ -159,7 +135,8 @@ public class ChangeStreamTests {
 		Thread.sleep(2000);
 	}
 
-	@Test
+	@Test // DATAMONGO-1803
+	@IfProfileValue(name = "replSet", value = "true")
 	public void startAndListenToChangeStreamOther() throws InterruptedException {
 
 		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
@@ -182,8 +159,8 @@ public class ChangeStreamTests {
 		Thread.sleep(2000);
 	}
 
-	@Test
-	public void testInfiniteStreams() throws InterruptedException {
+	@Test // DATAMONGO-1803
+	public void tailableCursor() throws InterruptedException {
 
 		dbFactory.getDb().createCollection(COLLECTION_NAME,
 				new CreateCollectionOptions().capped(true).maxDocuments(10000).sizeInBytes(10000));

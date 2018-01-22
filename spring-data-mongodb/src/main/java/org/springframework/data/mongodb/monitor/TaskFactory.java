@@ -18,6 +18,7 @@ package org.springframework.data.mongodb.monitor;
 import java.util.Collections;
 import java.util.List;
 
+import org.bson.BsonDocument;
 import org.bson.Document;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -31,6 +32,7 @@ import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
 
 import com.mongodb.CursorType;
+import com.mongodb.client.ChangeStreamIterable;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.changestream.ChangeStreamDocument;
 
@@ -59,6 +61,9 @@ class TaskFactory {
 
 		Assert.notNull(request, "Request must not be null!");
 
+		if (request instanceof TaskSubscriptionRequest) {
+			return ((TaskSubscriptionRequest) request).getTask();
+		}
 		if (request instanceof ChangeStreamRequest) {
 			return new ChangeStreamTask(tempate, (ChangeStreamRequest) request, targetType);
 		} else if (request instanceof TailableCursorRequest) {
@@ -174,16 +179,22 @@ class TaskFactory {
 
 				// TODO: mapping and correct context usage
 				filter = (List<Document>) csro.getFilter()
+
+						// TODO extract to method and apply collation from AggregationOptions.
 						.map(agg -> agg.toDocument("tmp", Aggregation.DEFAULT_CONTEXT).get("pipeline"))
 						.orElse(Collections.emptyList());
-
 			}
 
-			if (filter.isEmpty()) {
-				return template.getCollection(options.getCollectionName()).watch(Document.class).iterator();
-			} else {
-				return template.getCollection(options.getCollectionName()).watch(filter, Document.class).iterator();
+			ChangeStreamIterable<Document> iterable = filter.isEmpty()
+					? template.getCollection(options.getCollectionName()).watch(Document.class)
+					: template.getCollection(options.getCollectionName()).watch(filter, Document.class);
+
+			ChangeStreamRequestOptions csro = (ChangeStreamRequestOptions) options;
+			if (csro.getResumeToken().isPresent()) {
+				iterable = iterable.resumeAfter(BsonDocument.parse(csro.getResumeToken().get().toJson()));
 			}
+
+			return iterable.iterator();
 		}
 
 		@Override
