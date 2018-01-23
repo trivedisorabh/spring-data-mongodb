@@ -102,17 +102,12 @@ class TaskFactory {
 		@Override
 		public void run() {
 
-			synchronized (lifecycleMonitor) {
-
-				if (!State.ACTIVE.equals(state)) {
-					cursor = initCursor(template, request.getRequestOptions());
-					state = State.ACTIVE;
-				}
-			}
+			start();
 
 			while (State.ACTIVE.equals(state)) {
+
 				try {
-					if (cursor.hasNext()) {
+					if (cursor.hasNext()) { // todo need to check if the cursor is still open to avoid errors on read.
 						request.getMessageListener()
 								.onMessage(createMessage(cursor.next(), targetType, request.getRequestOptions()));
 					}
@@ -120,6 +115,56 @@ class TaskFactory {
 					System.out.println("damnit error in close : " + e.getMessage());
 				}
 			}
+		}
+
+		private void start() {
+
+			synchronized (lifecycleMonitor) {
+				if (!State.ACTIVE.equals(state)) {
+					state = State.STARTING;
+				}
+			}
+
+			boolean valid = false;
+
+			do {
+
+				synchronized (lifecycleMonitor) {
+
+					if (State.STARTING.equals(state)) {
+
+						MongoCursor<T> tmp = initCursor(template, request.getRequestOptions());
+						valid = isValidCursor(tmp);
+						if (valid) {
+							cursor = tmp;
+							state = State.ACTIVE;
+						} else {
+							tmp.close();
+						}
+					}
+				}
+
+				if (!valid) {
+					try {
+						Thread.sleep(100);
+					} catch (InterruptedException e) {
+						Thread.interrupted();
+					}
+				}
+			} while (!valid);
+		}
+
+		private boolean isValidCursor(MongoCursor<?> cursor) {
+
+			if (cursor == null) {
+				return false;
+			}
+
+			if (cursor.getServerCursor() == null || cursor.getServerCursor().getId() == 0) {
+				return false;
+			}
+
+			return true;
 		}
 
 		protected abstract MongoCursor<T> initCursor(MongoTemplate dbFactory, RequestOptions options);

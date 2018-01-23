@@ -170,8 +170,6 @@ public class DefaultMessageListenerContainerTests {
 		dbFactory.getDb().createCollection(COLLECTION_NAME,
 				new CreateCollectionOptions().capped(true).maxDocuments(10000).sizeInBytes(10000));
 
-		// TODO: we actually need to find a way messages get processed correctly even when there's no data avialable when
-		// starting the task
 		collection.insertOne(new Document("_id", "id-1").append("value", "foo"));
 
 		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
@@ -181,6 +179,28 @@ public class DefaultMessageListenerContainerTests {
 				container.register(new TailableCursorRequest(messageListener, () -> COLLECTION_NAME), Document.class),
 				Duration.ofMillis(500));
 
+		collection.insertOne(new Document("_id", "id-2").append("value", "bar"));
+
+		awaitMessages(2, Duration.ofSeconds(2));
+		container.stop();
+
+		assertThat(messageListener.getTotalNumberMessagesReceived()).isEqualTo(2);
+	}
+
+	@Test // DATAMONGO-1803
+	public void tailableCursorOnEmptyCollection() throws InterruptedException {
+
+		dbFactory.getDb().createCollection(COLLECTION_NAME,
+				new CreateCollectionOptions().capped(true).maxDocuments(10000).sizeInBytes(10000));
+
+		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
+		container.start();
+
+		awaitSubscription(
+				container.register(new TailableCursorRequest(messageListener, () -> COLLECTION_NAME), Document.class),
+				Duration.ofMillis(500));
+
+		collection.insertOne(new Document("_id", "id-1").append("value", "foo"));
 		collection.insertOne(new Document("_id", "id-2").append("value", "bar"));
 
 		awaitMessages(2, Duration.ofSeconds(2));

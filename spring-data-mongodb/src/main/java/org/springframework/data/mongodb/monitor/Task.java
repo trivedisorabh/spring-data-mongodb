@@ -19,6 +19,7 @@ import org.springframework.scheduling.SchedulingAwareRunnable;
 
 /**
  * A taks s
+ * 
  * @author Christoph Strobl
  * @since 2.1
  */
@@ -30,6 +31,6 @@ public interface Task extends SchedulingAwareRunnable, Cancelable {
 	boolean isActive();
 
 	enum State {
-		CREATED, ACTIVE, CANCELLED;
+		CREATED, STARTING, ACTIVE, CANCELLED;
 	}
 }
