@@ -18,19 +18,34 @@ package org.springframework.data.mongodb.monitor;
 import org.springframework.scheduling.SchedulingAwareRunnable;
 
 /**
- * A taks s
- * 
+ * The actual {@link Task} to run within the {@link MessageListenerContainer}.
+ *
  * @author Christoph Strobl
  * @since 2.1
  */
 public interface Task extends SchedulingAwareRunnable, Cancelable {
 
 	/**
-	 * @return {@literal true} if the task is currently active.
+	 * @return {@literal true} if the task is currently {@link State#RUNNING running}.
 	 */
-	boolean isActive();
+	default boolean isActive() {
+		return State.RUNNING.equals(getState());
+	}
 
+	/**
+	 * Get the current lifecycle phase.
+	 *
+	 * @return never {@literal null}.
+	 */
+	State getState();
+
+	/**
+	 * The {@link Task.State} defining the lifecycle phase the actual {@link Task}.
+	 *
+	 * @author Christoph Strobl
+	 * @since 2.1
+	 */
 	enum State {
-		CREATED, STARTING, ACTIVE, CANCELLED;
+		CREATED, STARTING, RUNNING, CANCELLED;
 	}
 }

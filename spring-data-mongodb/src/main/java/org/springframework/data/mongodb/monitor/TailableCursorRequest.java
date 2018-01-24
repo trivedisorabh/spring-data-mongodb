@@ -15,7 +15,10 @@
  */
 package org.springframework.data.mongodb.monitor;
 
+import java.util.Optional;
+
 import org.bson.Document;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
 
 /**
@@ -25,11 +28,12 @@ import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptio
 public class TailableCursorRequest<T> implements SubscriptionRequest<Message<Document, T>, RequestOptions> {
 
 	private MessageListener<Message<Document, T>> messageListener;
-	private RequestOptions options;
+	private TailableCursorRequestOptions options;
 
 	public TailableCursorRequest(MessageListener<Message<Document, T>> messageListener, RequestOptions options) {
 		this.messageListener = messageListener;
-		this.options = options;
+		this.options = options instanceof TailableCursorRequestOptions ? (TailableCursorRequestOptions) options
+				: new TailableCursorRequestOptions(options);
 	}
 
 	@Override
@@ -38,7 +42,52 @@ public class TailableCursorRequest<T> implements SubscriptionRequest<Message<Doc
 	}
 
 	@Override
-	public RequestOptions getRequestOptions() {
+	public TailableCursorRequestOptions getRequestOptions() {
 		return options;
+	}
+
+	public static class TailableCursorRequestOptions
+			implements org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions {
+
+		private String collectionName;
+		private Query query;
+
+		public TailableCursorRequestOptions() {}
+
+		private TailableCursorRequestOptions(RequestOptions options) {
+			this.collectionName = options.getCollectionName();
+		}
+
+		@Override
+		public String getCollectionName() {
+			return collectionName;
+		}
+
+		public Optional<Query> getQuery() {
+			return Optional.ofNullable(query);
+		}
+
+		public static class TailableCursorRequestOptionsBuilder {
+
+			TailableCursorRequestOptions options = new TailableCursorRequestOptions();
+
+			public TailableCursorRequestOptionsBuilder collection(String collection) {
+				options.collectionName = collection;
+				return this;
+			}
+
+			public TailableCursorRequestOptionsBuilder filter(Query filter) {
+				options.query = filter;
+				return this;
+			}
+
+			public TailableCursorRequestOptions build() {
+
+				TailableCursorRequestOptions tmp = options;
+				options = new TailableCursorRequestOptions();
+				return tmp;
+			}
+
+		}
 	}
 }

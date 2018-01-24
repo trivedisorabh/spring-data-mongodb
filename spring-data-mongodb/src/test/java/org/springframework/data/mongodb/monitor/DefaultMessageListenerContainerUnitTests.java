@@ -65,6 +65,77 @@ public class DefaultMessageListenerContainerUnitTests {
 		runOnce(new MultithreadedSubscribeAfterStartup(container));
 	}
 
+	@Test // DATAMONGO-1803
+	public void stopSubscriptionWhileRunning() throws Throwable {
+		runOnce(new StopSubscriptionWhileRunning(container));
+	}
+
+	@Test // DATAMONGO-1803
+	public void removeSubscriptionWhileRunning() throws Throwable {
+		runOnce(new StopSubscriptionWhileRunning(container));
+	}
+
+	private static class RemoveSubscriptionWhileRunning extends MultithreadedTestCase {
+
+		DefaultMessageListenerContainer container;
+		Subscription subscription;
+
+		public RemoveSubscriptionWhileRunning(DefaultMessageListenerContainer container) {
+			this.container = container;
+			subscription = container.register(new MockTask());
+		}
+
+		public void thread1() {
+
+			assertTick(0);
+			container.start();
+
+			waitForTick(2);
+			assertThat(container.isRunning());
+			container.stop();
+		}
+
+		public void thread2() throws InterruptedException {
+
+			waitForTick(1);
+			assertThat(subscription.isActive()).isTrue();
+
+			container.remove(subscription);
+			assertThat(subscription.isActive()).isFalse();
+		}
+	}
+
+	private static class StopSubscriptionWhileRunning extends MultithreadedTestCase {
+
+		DefaultMessageListenerContainer container;
+		Subscription subscription;
+
+		public StopSubscriptionWhileRunning(DefaultMessageListenerContainer container) {
+			this.container = container;
+			subscription = container.register(new MockTask());
+		}
+
+		public void thread1() {
+
+			assertTick(0);
+			container.start();
+
+			waitForTick(2);
+			assertThat(container.isRunning());
+			container.stop();
+		}
+
+		public void thread2() throws InterruptedException {
+
+			waitForTick(1);
+			assertThat(subscription.isActive()).isTrue();
+
+			subscription.cancel();
+			assertThat(subscription.isActive()).isFalse();
+		}
+
+	}
+
 	private static class MultithreadedSubscribeAfterStartup extends MultithreadedTestCase {
 
 		DefaultMessageListenerContainer container;
@@ -154,16 +225,11 @@ public class DefaultMessageListenerContainerUnitTests {
 
 	static class MockTask implements Task {
 
-		boolean active;
-
-		@Override
-		public boolean isActive() {
-			return active;
-		}
-
+		volatile State state;
+		
 		@Override
 		public void cancel() throws DataAccessResourceFailureException {
-			active = false;
+			state = State.CANCELLED;
 		}
 
 		@Override
@@ -172,8 +238,22 @@ public class DefaultMessageListenerContainerUnitTests {
 		}
 
 		@Override
+		public State getState() {
+			return state;
+		}
+
+		@Override
 		public void run() {
-			active = true;
+
+			state = State.RUNNING;
+			
+			while (isActive()) {
+				try {
+					Thread.sleep(10);
+				} catch (InterruptedException e) {
+					Thread.interrupted();
+				}
+			}
 		}
 	}
 }

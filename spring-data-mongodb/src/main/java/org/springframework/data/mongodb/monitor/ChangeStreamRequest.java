@@ -101,7 +101,7 @@ public class ChangeStreamRequest<T>
 				return this;
 			}
 
-			public ChangeStreamRequestOptionsBuilder collection(Aggregation filter) {
+			public ChangeStreamRequestOptionsBuilder filter(Aggregation filter) {
 				options.filter = filter;
 				return this;
 			}

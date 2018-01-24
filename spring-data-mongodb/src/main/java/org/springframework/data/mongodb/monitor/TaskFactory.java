@@ -31,6 +31,7 @@ import org.springframework.data.mongodb.core.convert.QueryMapper;
 import org.springframework.data.mongodb.monitor.ChangeStreamRequest.ChangeStreamRequestOptions;
 import org.springframework.data.mongodb.monitor.Message.MessageProperties;
 import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
+import org.springframework.data.mongodb.monitor.TailableCursorRequest.TailableCursorRequestOptions;
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
@@ -92,6 +93,11 @@ class TaskFactory {
 
 		private MongoCursor<T> cursor;
 
+		/**
+		 * @param template must not be {@literal null}.
+		 * @param request must not be {@literal null}.
+		 * @param targetType must not be {@literal null}.
+		 */
 		public CursorReadingTask(MongoTemplate template, SubscriptionRequest request, Class<?> targetType) {
 
 			this.template = template;
@@ -99,35 +105,52 @@ class TaskFactory {
 			this.targetType = targetType;
 		}
 
+		/* 
+		 * (non-Javadoc)
+		 * @see java.lang.Runnable
+		 */
 		@Override
 		public void run() {
 
 			start();
 
-			while (State.ACTIVE.equals(state)) {
-
+			while (isRunning()) {
 				try {
-					if (cursor.hasNext()) { // todo need to check if the cursor is still open to avoid errors on read.
-						request.getMessageListener()
-								.onMessage(createMessage(cursor.next(), targetType, request.getRequestOptions()));
+					T next = getNext();
+					if (next != null) {
+						emitMessage(createMessage(next, targetType, request.getRequestOptions()));
+					} else {
+						Thread.sleep(10);
 					}
 				} catch (IllegalStateException e) {
-					System.out.println("damnit error in close : " + e.getMessage());
+					e.printStackTrace();
+				} catch (InterruptedException e) {
+					Thread.interrupted();
 				}
 			}
 		}
 
+		/**
+		 * Initialize the Task by 1st setting the current state to
+		 * {@link org.springframework.data.mongodb.monitor.Task.State#STARTING starting} indicating the initialization
+		 * procedure. <br />
+		 * Moving on the underlying {@link MongoCursor} gets {@link #initCursor(MongoTemplate, RequestOptions) created} and
+		 * is {@link #isValidCursor(MongoCursor) health checked}. Once a valid {@link MongoCursor} is created the
+		 * {@link #state} is set to {@link org.springframework.data.mongodb.monitor.Task.State#RUNNING running}. If the
+		 * health check is not passed the {@link MongoCursor} is immediately {@link MongoCursor#close() closed} and a new
+		 * {@link MongoCursor} is requested until a valid one is retrieved or the {@link #state} changes.
+		 */
 		private void start() {
 
 			synchronized (lifecycleMonitor) {
-				if (!State.ACTIVE.equals(state)) {
+				if (!State.RUNNING.equals(state)) {
 					state = State.STARTING;
 				}
 			}
 
-			boolean valid = false;
-
 			do {
+
+				boolean valid = false;
 
 				synchronized (lifecycleMonitor) {
 
@@ -137,7 +160,7 @@ class TaskFactory {
 						valid = isValidCursor(tmp);
 						if (valid) {
 							cursor = tmp;
-							state = State.ACTIVE;
+							state = State.RUNNING;
 						} else {
 							tmp.close();
 						}
@@ -151,7 +174,70 @@ class TaskFactory {
 						Thread.interrupted();
 					}
 				}
-			} while (!valid);
+			} while (State.STARTING.equals(getState()));
+		}
+
+		protected abstract MongoCursor<T> initCursor(MongoTemplate dbFactory, RequestOptions options);
+
+		@Override
+		public void cancel() throws DataAccessResourceFailureException {
+
+			synchronized (lifecycleMonitor) {
+
+				if (State.RUNNING.equals(state) || State.STARTING.equals(state)) {
+					this.state = State.CANCELLED;
+					if (cursor != null) {
+						cursor.close();
+					}
+				}
+			}
+		}
+
+		@Override
+		public boolean isLongLived() {
+			return true;
+		}
+
+		@Override
+		public State getState() {
+			synchronized (lifecycleMonitor) {
+				return state;
+			}
+		}
+
+		private Message createMessage(T source, Class targetType, RequestOptions options) {
+			return new LazyMappingDelegatingMessage(doCreateMessage(source, options), targetType, template.getConverter());
+		}
+
+		/**
+		 * Customization hook.
+		 *
+		 * @param source never {@literal null}.
+		 * @param options never {@literal null}.
+		 * @return never {@literal null}.
+		 */
+		protected Message doCreateMessage(T source, RequestOptions options) {
+			return new SimpleMessage(source, source,
+					MessageProperties.builder().collectionName(options.getCollectionName()).build());
+		}
+
+		private boolean isRunning() {
+			return State.RUNNING.equals(getState());
+		}
+
+		private void emitMessage(Message message) {
+			request.getMessageListener().onMessage(message);
+		}
+
+		private T getNext() {
+
+			synchronized (lifecycleMonitor) {
+				if (State.RUNNING.equals(state)) {
+					return cursor.tryNext();
+				}
+			}
+
+			throw new IllegalStateException(String.format("Cursor %s is not longer open.", cursor));
 		}
 
 		private boolean isValidCursor(MongoCursor<?> cursor) {
@@ -165,45 +251,6 @@ class TaskFactory {
 			}
 
 			return true;
-		}
-
-		protected abstract MongoCursor<T> initCursor(MongoTemplate dbFactory, RequestOptions options);
-
-		private Message createMessage(T source, Class targetType, RequestOptions options) {
-			return new LazyMappingDelegatingMessage(doCreateMessage(source, options), targetType, template.getConverter());
-		}
-
-		protected Message doCreateMessage(T source, RequestOptions options) {
-			return new SimpleMessage(source, source,
-					MessageProperties.builder().collectionName(options.getCollectionName()).build());
-		}
-
-		@Override
-		public boolean isActive() {
-			return State.ACTIVE.equals(getState());
-		}
-
-		@Override
-		public void cancel() throws DataAccessResourceFailureException {
-
-			synchronized (lifecycleMonitor) {
-
-				if (State.ACTIVE.equals(state)) {
-					this.state = State.CANCELLED;
-					cursor.close();
-				}
-			}
-		}
-
-		@Override
-		public boolean isLongLived() {
-			return true;
-		}
-
-		public State getState() {
-			synchronized (lifecycleMonitor) {
-				return state;
-			}
 		}
 	}
 
@@ -279,13 +326,26 @@ class TaskFactory {
 	 */
 	static class TailableCursorTask extends CursorReadingTask<Document> {
 
+		private QueryMapper queryMapper;
+
 		public TailableCursorTask(MongoTemplate template, TailableCursorRequest request, Class<?> targetType) {
 			super(template, request, targetType);
+			queryMapper = new QueryMapper(template.getConverter());
 		}
 
 		@Override
 		protected MongoCursor<Document> initCursor(MongoTemplate template, RequestOptions options) {
-			return template.getCollection(options.getCollectionName()).find().cursorType(CursorType.TailableAwait)
+
+			Document filter = new Document();
+			if (options instanceof TailableCursorRequestOptions) {
+				TailableCursorRequestOptions tcro = (TailableCursorRequestOptions) options;
+				tcro.getQuery().ifPresent(q -> filter.putAll(queryMapper.getMappedObject(q.getQueryObject(),
+						template.getConverter().getMappingContext().getPersistentEntity(Object.class))));
+
+				// TODO: collations
+			}
+
+			return template.getCollection(options.getCollectionName()).find(filter).cursorType(CursorType.TailableAwait)
 					.noCursorTimeout(true).iterator();
 		}
 
