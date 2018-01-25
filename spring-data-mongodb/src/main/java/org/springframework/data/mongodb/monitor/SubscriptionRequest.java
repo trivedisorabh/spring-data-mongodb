@@ -29,17 +29,30 @@ import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptio
 interface SubscriptionRequest<M extends Message, O extends RequestOptions> {
 
 	/**
+	 * Obtain the {@link MessageListener} to publish {@link Message messages} to.
+	 *
 	 * @return never {@literal null}.
 	 */
 	MessageListener<M> getMessageListener();
 
 	/**
-	 * @return
+	 * Get the {@link RequestOptions} specifying the requests behaviour.
+	 *
+	 * @return never {@literal null}.
 	 */
 	O getRequestOptions();
 
+	/**
+	 * Options for specifying the behaviour of the {@link SubscriptionRequest}.
+	 *
+	 * @author Christoph Strobl
+	 * @since 2.1
+	 */
 	static interface RequestOptions {
 
+		/**
+		 * @return the name of the collection to subscribe to. Never {@literal null}.
+		 */
 		String getCollectionName();
 
 	}

@@ -15,9 +15,11 @@
  */
 package org.springframework.data.mongodb.monitor;
 
+import lombok.EqualsAndHashCode;
 import lombok.ToString;
 
 import org.springframework.lang.Nullable;
+import org.springframework.util.Assert;
 
 /**
  * General message abstraction for any type of Event / Message published by MongoDB server to the client. This might be
@@ -26,12 +28,12 @@ import org.springframework.lang.Nullable;
  * <a href="https://docs.mongodb.com/manual/core/tailable-cursors/">tailable cursor</a>. The original message received
  * is preserved in the raw parameter. Additional information about the origin of the {@link Message} is contained in
  * {@link MessageProperties}. <br />
- * For convenience the raw message source can be transformed using a {@link MessageConverter} by delegating the
- * {@link Message} to {@link ConvertibleMessage}.
+ * For convenience the {@link #getBody()} of the message gets lazily converted into the target domain type if necessary
+ * using the mapping infrastructure.
  *
  * @author Christoph Strobl
- * @since 2.1
  * @see MessageProperties
+ * @since 2.1
  */
 interface Message<S, T> {
 
@@ -44,16 +46,17 @@ interface Message<S, T> {
 	S getRaw();
 
 	/**
-	 * message body
-	 * 
-	 * @return
+	 * The converted message body if applicable.
+	 *
+	 * @return can be {@literal null}.
 	 */
+	@Nullable
 	T getBody();
 
 	/**
 	 * {@link MessageProperties} containing information about the {@link Message} origin and other metadata.
-	 * 
-	 * @return never {@literal null}
+	 *
+	 * @return never {@literal null}.
 	 */
 	MessageProperties getMessageProperties();
 
@@ -62,6 +65,7 @@ interface Message<S, T> {
 	 * @since 2.1
 	 */
 	@ToString
+	@EqualsAndHashCode
 	static class MessageProperties {
 
 		private static final MessageProperties EMPTY = new MessageProperties();
@@ -69,45 +73,73 @@ interface Message<S, T> {
 		private String databaseName;
 		private String collectionName;
 
+		/**
+		 * The database name the message originates from.
+		 *
+		 * @return
+		 */
 		@Nullable
 		public String getDatabaseName() {
 			return databaseName;
 		}
 
+		/**
+		 * The collection name the message originates from.
+		 *
+		 * @return
+		 */
 		@Nullable
 		public String getCollectionName() {
 			return collectionName;
 		}
 
-		static MessageProperties empty() {
+		/**
+		 * @return empty {@link MessageProperties}.
+		 */
+		public static MessageProperties empty() {
 			return EMPTY;
 		}
 
-		static MessagePropertiesBuilder builder() {
+		/**
+		 * Obtain a shiny new {@link MessagePropertiesBuilder} and start defining options in this fancy fluent way. Just
+		 * don't forget to call {@link MessagePropertiesBuilder#build() build()} when your're done.
+		 *
+		 * @return new instance of {@link MessagePropertiesBuilder}.
+		 */
+		public static MessagePropertiesBuilder builder() {
 			return new MessagePropertiesBuilder();
 		}
 
+		/**
+		 * @author Christoph Strobl
+		 * @since 2.1
+		 */
 		public static class MessagePropertiesBuilder {
 
-			MessageProperties properties = new MessageProperties();
+			private MessageProperties properties = new MessageProperties();
 
 			MessagePropertiesBuilder databaseName(String dbName) {
+
+				Assert.notNull(dbName, "DbName must not be null!");
+
 				properties.databaseName = dbName;
 				return this;
 			}
 
 			MessagePropertiesBuilder collectionName(String collectionName) {
+
+				Assert.notNull(collectionName, "CollectionName must not be null!");
+
 				properties.collectionName = collectionName;
 				return this;
 			}
-			
+
 			MessageProperties build() {
 
 				MessageProperties properties = this.properties;
 				this.properties = new MessageProperties();
 				return properties;
 			}
-
 		}
 	}
 }

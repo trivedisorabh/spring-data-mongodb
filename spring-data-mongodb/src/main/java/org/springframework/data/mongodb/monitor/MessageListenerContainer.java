@@ -29,9 +29,20 @@ interface MessageListenerContainer extends SmartLifecycle {
 
 	/**
 	 * Register a new {@link SubscriptionRequest} in the container. If the {@link MessageListenerContainer#isRunning() is
-	 * already running} the subscription will be added and run immediately, otherwise it'll be scheduled and started once
-	 * the container is actually {@link MessageListenerContainer#start() started}.
-	 * <p />
+	 * already running} the {@link Subscription} will be added and run immediately, otherwise it'll be scheduled and
+	 * started once the container is actually {@link MessageListenerContainer#start() started}.
+	 *
+	 * <pre>
+	 * <code>
+	 *     MessageListenerContainer container = ...
+	 *     
+	 *     MessageListener<Message<ChangeStreamDocument<Document>, Document>> messageListener = (message) -> message.getBody().toJson();
+	 *     ChangeStreamRequest<Document> request = new ChangeStreamRequest<>(messageListener, () -> "collection-name");
+	 *     
+	 *     Subscription subscription = container.register(request, Document.class);
+	 * </code>
+	 * </pre>
+	 *
 	 * On {@link MessageListenerContainer#stop()} all {@link Subscription subscriptions} are cancelled prior to shutting
 	 * down the container itself.
 	 * <p />
@@ -42,6 +53,7 @@ interface MessageListenerContainer extends SmartLifecycle {
 	 * is restarted once the container itself is restarted.
 	 *
 	 * @param request must not be {@literal null}.
+	 * @param type the exact target or a more concrete type of the {@link Message#getBody()}.
 	 * @return never {@literal null}.
 	 */
 	<T, M extends Message<?, ? super T>> Subscription register(SubscriptionRequest<M, ? extends RequestOptions> request,
@@ -50,7 +62,7 @@ interface MessageListenerContainer extends SmartLifecycle {
 	/**
 	 * Unregister a given {@link Subscription} from the container. This prevents the {@link Subscription} to be restarted
 	 * in a potential {@link SmartLifecycle#stop() stop}/{@link SmartLifecycle#start() start} scenario.<br />
-	 * {@link Subscription#isActive() Active} {@link Subscription subcriptions} are {@link Subscription#cancel()
+	 * An {@link Subscription#isActive() active} {@link Subscription subcription} is {@link Subscription#cancel()
 	 * cancelled} prior to removal.
 	 *
 	 * @param subscription must not be {@literal null}.

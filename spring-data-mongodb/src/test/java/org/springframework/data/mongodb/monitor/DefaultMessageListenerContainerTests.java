@@ -16,12 +16,11 @@
 package org.springframework.data.mongodb.monitor;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.springframework.data.mongodb.monitor.SubscriptionUtils.*;
 
 import lombok.Data;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.stream.Collectors;
 
 import org.bson.Document;
@@ -83,7 +82,7 @@ public class DefaultMessageListenerContainerTests {
 		collection.insertOne(new Document("_id", "id-1").append("firstname", "foo"));
 		collection.insertOne(new Document("_id", "id-2").append("firstname", "bar"));
 
-		awaitMessages(2, Duration.ofMillis(500));
+		awaitMessages(messageListener, 2, Duration.ofMillis(500));
 
 		assertThat(messageListener.getMessages().stream().map(Message::getBody).collect(Collectors.toList()))
 				.containsExactly(new Person("id-1", "foo"), new Person("id-2", "bar"));
@@ -104,7 +103,7 @@ public class DefaultMessageListenerContainerTests {
 		collection.insertOne(new Document("_id", "id-1").append("value", "foo"));
 		collection.insertOne(new Document("_id", "id-2").append("value", "bar"));
 
-		awaitMessages(2, Duration.ofMillis(500));
+		awaitMessages(messageListener, 2, Duration.ofMillis(500));
 
 		container.stop();
 
@@ -133,7 +132,7 @@ public class DefaultMessageListenerContainerTests {
 		Document expected = new Document("_id", "id-2").append("value", "bar");
 		collection.insertOne(expected);
 
-		awaitMessages(1, Duration.ofMillis(500));
+		awaitMessages(messageListener, 1, Duration.ofMillis(500));
 		container.stop();
 
 		assertThat(messageListener.getMessages().stream().map(Message::getBody).collect(Collectors.toList()))
@@ -181,7 +180,7 @@ public class DefaultMessageListenerContainerTests {
 
 		collection.insertOne(new Document("_id", "id-2").append("value", "bar"));
 
-		awaitMessages(2, Duration.ofSeconds(2));
+		awaitMessages(messageListener, 2, Duration.ofSeconds(2));
 		container.stop();
 
 		assertThat(messageListener.getTotalNumberMessagesReceived()).isEqualTo(2);
@@ -203,28 +202,10 @@ public class DefaultMessageListenerContainerTests {
 		collection.insertOne(new Document("_id", "id-1").append("value", "foo"));
 		collection.insertOne(new Document("_id", "id-2").append("value", "bar"));
 
-		awaitMessages(2, Duration.ofSeconds(2));
+		awaitMessages(messageListener, 2, Duration.ofSeconds(2));
 		container.stop();
 
 		assertThat(messageListener.getTotalNumberMessagesReceived()).isEqualTo(2);
-	}
-
-	static class CollectingMessageListener<M extends Message> implements MessageListener<M> {
-
-		volatile List<M> messages = new ArrayList<>();
-
-		@Override
-		public void onMessage(M message) {
-			messages.add(message);
-		}
-
-		int getTotalNumberMessagesReceived() {
-			return messages.size();
-		}
-
-		public List<M> getMessages() {
-			return messages;
-		}
 	}
 
 	@Data
@@ -238,26 +219,6 @@ public class DefaultMessageListenerContainerTests {
 		public Person(String id, String firstname) {
 			this.id = id;
 			this.firstname = firstname;
-		}
-	}
-
-	private void awaitSubscription(Subscription subscription, Duration max) throws InterruptedException {
-
-		long passedMs = 0;
-		long maxMs = max.toMillis();
-		while (!subscription.isActive() && passedMs < maxMs) {
-			Thread.sleep(10);
-			passedMs += 10;
-		}
-	}
-
-	private void awaitMessages(int nrMessages, Duration max) throws InterruptedException {
-
-		long passedMs = 0;
-		long maxMs = max.toMillis();
-		while (messageListener.getTotalNumberMessagesReceived() < nrMessages && passedMs < maxMs) {
-			Thread.sleep(10);
-			passedMs += 10;
 		}
 	}
 }

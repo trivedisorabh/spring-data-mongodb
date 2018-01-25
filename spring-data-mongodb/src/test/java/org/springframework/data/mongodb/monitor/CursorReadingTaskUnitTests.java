@@ -59,6 +59,8 @@ public class CursorReadingTaskUnitTests {
 
 		when(request.getRequestOptions()).thenReturn(options);
 		when(request.getMessageListener()).thenReturn(listener);
+		when(options.getCollectionName()).thenReturn("collection-name");
+
 		task = new ValueCapturingTaskStub(template, request, Object.class, cursor);
 	}
 
@@ -192,7 +194,7 @@ public class CursorReadingTaskUnitTests {
 		final MongoCursor cursor;
 		final List<Object> values = new CopyOnWriteArrayList();
 
-		public ValueCapturingTaskStub(MongoTemplate template, SubscriptionRequest request, Class targetType,
+		public ValueCapturingTaskStub(MongoTemplate template, SubscriptionRequest request, Class<?> targetType,
 				MongoCursor cursor) {
 
 			super(template, request, targetType);
@@ -200,7 +202,7 @@ public class CursorReadingTaskUnitTests {
 		}
 
 		@Override
-		protected MongoCursor initCursor(MongoTemplate dbFactory, RequestOptions options) {
+		protected MongoCursor initCursor(MongoTemplate dbFactory, RequestOptions options, Class targetType) {
 			return cursor;
 		}
 

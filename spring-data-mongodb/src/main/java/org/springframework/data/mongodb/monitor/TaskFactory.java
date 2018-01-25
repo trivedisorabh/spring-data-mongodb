@@ -15,8 +15,11 @@
  */
 package org.springframework.data.mongodb.monitor;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import org.bson.BsonDocument;
 import org.bson.Document;
@@ -24,6 +27,8 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOperationContext;
+import org.springframework.data.mongodb.core.aggregation.ExposedFields.FieldReference;
+import org.springframework.data.mongodb.core.aggregation.Field;
 import org.springframework.data.mongodb.core.aggregation.TypeBasedAggregationOperationContext;
 import org.springframework.data.mongodb.core.aggregation.TypedAggregation;
 import org.springframework.data.mongodb.core.convert.MongoConverter;
@@ -39,7 +44,9 @@ import org.springframework.util.ClassUtils;
 import com.mongodb.CursorType;
 import com.mongodb.client.ChangeStreamIterable;
 import com.mongodb.client.MongoCursor;
+import com.mongodb.client.model.Collation;
 import com.mongodb.client.model.changestream.ChangeStreamDocument;
+import com.mongodb.client.model.changestream.FullDocument;
 
 /**
  * A simple factory for creating {@link Task} for a given {@link SubscriptionRequest}.
@@ -51,7 +58,13 @@ class TaskFactory {
 
 	private final MongoTemplate tempate;
 
-	public TaskFactory(MongoTemplate template) {
+	/**
+	 * @param template must not be {@literal null}.
+	 */
+	TaskFactory(MongoTemplate template) {
+
+		Assert.notNull(template, "Template must not be null!");
+
 		this.tempate = template;
 	}
 
@@ -156,7 +169,7 @@ class TaskFactory {
 
 					if (State.STARTING.equals(state)) {
 
-						MongoCursor<T> tmp = initCursor(template, request.getRequestOptions());
+						MongoCursor<T> tmp = initCursor(template, request.getRequestOptions(), targetType);
 						valid = isValidCursor(tmp);
 						if (valid) {
 							cursor = tmp;
@@ -177,7 +190,7 @@ class TaskFactory {
 			} while (State.STARTING.equals(getState()));
 		}
 
-		protected abstract MongoCursor<T> initCursor(MongoTemplate dbFactory, RequestOptions options);
+		protected abstract MongoCursor<T> initCursor(MongoTemplate template, RequestOptions options, Class<?> targetType);
 
 		@Override
 		public void cancel() throws DataAccessResourceFailureException {
@@ -271,19 +284,35 @@ class TaskFactory {
 		}
 
 		@Override
-		protected MongoCursor<ChangeStreamDocument<Document>> initCursor(MongoTemplate template, RequestOptions options) {
+		protected MongoCursor<ChangeStreamDocument<Document>> initCursor(MongoTemplate template, RequestOptions options,
+				Class<?> targetType) {
 
 			List<Document> filter = Collections.emptyList();
 			BsonDocument resumeToken = new BsonDocument();
+			Collation collation = null;
+			FullDocument fullDocument = FullDocument.DEFAULT;
 
 			if (options instanceof ChangeStreamRequestOptions) {
 
 				ChangeStreamRequestOptions changeStreamRequestOptions = (ChangeStreamRequestOptions) options;
 				filter = prepareFilter(template, changeStreamRequestOptions);
 
-				if (changeStreamRequestOptions.getResumeToken().isPresent()) {
-					resumeToken = BsonDocument.parse(changeStreamRequestOptions.getResumeToken().get().toJson());
+				if (changeStreamRequestOptions.getFilter().isPresent()) {
+
+					Object val = changeStreamRequestOptions.getFilter().get();
+					if (val instanceof Aggregation) {
+						collation = ((Aggregation) val).getOptions().getCollation()
+								.map(org.springframework.data.mongodb.core.query.Collation::toMongoCollation).orElse(null);
+					}
 				}
+
+				if (changeStreamRequestOptions.getResumeToken().isPresent()) {
+					resumeToken = changeStreamRequestOptions.getResumeToken().get().asDocument();
+				}
+
+				fullDocument = changeStreamRequestOptions.getFullDocumentLookup()
+						.orElseGet(() -> ClassUtils.isAssignable(Document.class, targetType) ? FullDocument.DEFAULT
+								: FullDocument.UPDATE_LOOKUP);
 			}
 
 			ChangeStreamIterable<Document> iterable = filter.isEmpty()
@@ -294,29 +323,95 @@ class TaskFactory {
 				iterable = iterable.resumeAfter(resumeToken);
 			}
 
+			if (collation != null) {
+				iterable = iterable.collation(collation);
+			}
+
+			iterable = iterable.fullDocument(fullDocument);
+
 			return iterable.iterator();
 		}
 
 		List<Document> prepareFilter(MongoTemplate template, ChangeStreamRequestOptions options) {
 
-			if (options.getFilter().isPresent()) {
+			if (!options.getFilter().isPresent()) {
+				return Collections.emptyList();
+			}
 
-				Aggregation agg = options.getFilter().get();
+			Object filter = options.getFilter().get();
+			if (filter instanceof Aggregation) {
+				Aggregation agg = (Aggregation) filter;
 				AggregationOperationContext context = agg instanceof TypedAggregation
 						? new TypeBasedAggregationOperationContext(((TypedAggregation) agg).getInputType(),
 								template.getConverter().getMappingContext(), queryMapper)
 						: Aggregation.DEFAULT_CONTEXT;
 
-				return agg.toPipeline(context);
+				return agg.toPipeline(new PrefixingDelegatingAggregationOperationContext(context));
+			} else if (filter instanceof List) {
+				return (List<Document>) filter;
+			} else {
+				throw new IllegalArgumentException(
+						"ChangeStreamRequestOptions.filter mut be either an Aggregation or a plain list of Documents");
 			}
-
-			return Collections.emptyList();
 		}
 
 		@Override
 		protected Message doCreateMessage(ChangeStreamDocument<Document> source, RequestOptions options) {
+
 			return new SimpleMessage(source, source.getFullDocument(),
-					MessageProperties.builder().collectionName(options.getCollectionName()).build());
+					MessageProperties.builder().databaseName(source.getNamespace().getDatabaseName())
+							.collectionName(source.getNamespace().getCollectionName()).build());
+		}
+
+		static class PrefixingDelegatingAggregationOperationContext implements AggregationOperationContext {
+
+			final AggregationOperationContext delegate;
+
+			public PrefixingDelegatingAggregationOperationContext(AggregationOperationContext delegate) {
+				this.delegate = delegate;
+			}
+
+			@Override
+			public Document getMappedObject(Document document) {
+				return prefix(delegate.getMappedObject(document));
+			}
+
+			private Document prefix(Document source) {
+
+				Document result = new Document();
+				for (Map.Entry<String, Object> entry : source.entrySet()) {
+
+					String key = entry.getKey().startsWith("$") ? entry.getKey() : "fullDocument." + entry.getKey();
+					Object value = entry.getValue();
+
+					if (entry.getValue() instanceof Collection) {
+						List tmp = new ArrayList();
+						for (Object o : (Collection) entry.getValue()) {
+							if (o instanceof Document) {
+								tmp.add(prefix((Document) o));
+							} else {
+								tmp.add(o);
+							}
+						}
+						value = tmp;
+					} else if (entry.getValue() instanceof Document) {
+						value = prefix((Document) entry.getValue());
+					}
+
+					result.append(key, value);
+				}
+				return result;
+			}
+
+			@Override
+			public FieldReference getReference(Field field) {
+				return delegate.getReference(field);
+			}
+
+			@Override
+			public FieldReference getReference(String name) {
+				return delegate.getReference(name);
+			}
 		}
 	}
 
@@ -334,7 +429,7 @@ class TaskFactory {
 		}
 
 		@Override
-		protected MongoCursor<Document> initCursor(MongoTemplate template, RequestOptions options) {
+		protected MongoCursor<Document> initCursor(MongoTemplate template, RequestOptions options, Class<?> targetType) {
 
 			Document filter = new Document();
 			if (options instanceof TailableCursorRequestOptions) {
@@ -394,6 +489,11 @@ class TaskFactory {
 		@Override
 		public MessageProperties getMessageProperties() {
 			return delegate.getMessageProperties();
+		}
+
+		@Override
+		public String toString() {
+			return "LazyMappingDelegatingMessage {" + "delegate=" + delegate + ", targetType=" + targetType + '}';
 		}
 	}
 }
