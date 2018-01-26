@@ -16,6 +16,8 @@
 package org.springframework.data.mongodb.monitor;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
 import static org.springframework.data.mongodb.monitor.SubscriptionUtils.*;
 
 import lombok.Data;
@@ -28,12 +30,15 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TestRule;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.MongoDbFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoDbFactory;
 import org.springframework.data.mongodb.test.util.ReplicaSet;
 import org.springframework.test.annotation.IfProfileValue;
+import org.springframework.util.ErrorHandler;
 
 import com.mongodb.MongoClient;
 import com.mongodb.client.MongoCollection;
@@ -206,6 +211,65 @@ public class DefaultMessageListenerContainerTests {
 		container.stop();
 
 		assertThat(messageListener.getTotalNumberMessagesReceived()).isEqualTo(2);
+	}
+
+	@Test // DATAMONGO-1803
+	public void abortsSubscriptionOnError() throws InterruptedException {
+
+		dbFactory.getDb().createCollection(COLLECTION_NAME,
+				new CreateCollectionOptions().capped(true).maxDocuments(10000).sizeInBytes(10000));
+
+		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
+		container.start();
+
+		collection.insertOne(new Document("_id", "id-1").append("value", "foo"));
+
+		Subscription subscription = container.register(new TailableCursorRequest(messageListener, () -> COLLECTION_NAME),
+				Document.class);
+
+		awaitSubscription(subscription);
+
+		assertThat(subscription.isActive()).isTrue();
+
+		collection.insertOne(new Document("_id", "id-2").append("value", "bar"));
+		collection.drop();
+
+		awaitMessages(messageListener);
+
+		assertThat(subscription.isActive()).isFalse();
+
+		container.stop();
+	}
+
+	@Test // DATAMONGO-1803
+	public void callsDefaultErrorHandlerOnError() throws InterruptedException {
+
+		dbFactory.getDb().createCollection(COLLECTION_NAME,
+				new CreateCollectionOptions().capped(true).maxDocuments(10000).sizeInBytes(10000));
+
+		collection.insertOne(new Document("_id", "id-1").append("value", "foo"));
+
+		ErrorHandler errorHandler = mock(ErrorHandler.class);
+
+		DefaultMessageListenerContainer container = new DefaultMessageListenerContainer(template,
+				new SimpleAsyncTaskExecutor(), errorHandler);
+
+		try {
+			container.start();
+
+			Subscription subscription = container.register(new TailableCursorRequest(messageListener, () -> COLLECTION_NAME),
+					Document.class);
+
+			SubscriptionUtils.awaitSubscription(subscription);
+
+			template.dropCollection(COLLECTION_NAME);
+
+			Thread.sleep(20);
+
+			verify(errorHandler, atLeast(1)).handleError(any(DataAccessException.class));
+		} finally {
+			container.stop();
+		}
 	}
 
 	@Data

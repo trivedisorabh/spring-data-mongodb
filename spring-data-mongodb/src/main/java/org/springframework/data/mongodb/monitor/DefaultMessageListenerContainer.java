@@ -15,17 +15,24 @@
  */
 package org.springframework.data.mongodb.monitor;
 
+import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
+import lombok.RequiredArgsConstructor;
 
-import java.util.Set;
-import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
+import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
+import org.springframework.util.ErrorHandler;
 
 /**
  * Simple {@link Executor} based {@link MessageListenerContainer} implementation. <br />
@@ -35,7 +42,6 @@ import org.springframework.util.Assert;
  */
 class DefaultMessageListenerContainer implements MessageListenerContainer {
 
-	private final MongoTemplate template;
 	private final Executor taskExecutor;
 
 	private final Object lifecycleMonitor = new Object();
@@ -43,37 +49,58 @@ class DefaultMessageListenerContainer implements MessageListenerContainer {
 	private int phase = Integer.MAX_VALUE;
 	private boolean running = false;
 
-	private volatile Set<Subscription> subscriptions = new CopyOnWriteArraySet<>();
+	private final Map<SubscriptionRequest, Subscription> subscriptions = new LinkedHashMap<>();
 	private final TaskFactory taskFactory;
+	private final Optional<ErrorHandler> errorHandler;
 
 	DefaultMessageListenerContainer(MongoTemplate template) {
 		this(template, new SimpleAsyncTaskExecutor());
 	}
 
 	DefaultMessageListenerContainer(MongoTemplate template, Executor taskExecutor) {
+		this(template, taskExecutor, null);
+	}
+
+	/**
+	 * @param template must not be {@literal null}. Used by the {@link TaskFactory}.
+	 * @param taskExecutor must not be {@literal null}.
+	 * @param errorHandler the default {@link ErrorHandler} to be used by tasks inside the container. Can be
+	 *          {@literal null}.
+	 */
+	DefaultMessageListenerContainer(MongoTemplate template, Executor taskExecutor, @Nullable ErrorHandler errorHandler) {
 
 		Assert.notNull(template, "Template must not be null!");
 		Assert.notNull(taskExecutor, "TaskExecutor must not be null!");
 
 		this.taskExecutor = taskExecutor;
-		this.template = template;
 		this.taskFactory = new TaskFactory(template);
+		this.errorHandler = Optional.ofNullable(errorHandler);
 	}
 
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.context.SmartLifecycle#isAutoStartup()
+	 */
 	@Override
 	public boolean isAutoStartup() {
 		return false;
 	}
 
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.context.SmartLifecycle#stop(java.lang.Runnable)
+	 */
 	@Override
 	public void stop(Runnable callback) {
 
-		synchronized (this.lifecycleMonitor) {
-			stop();
-			callback.run();
-		}
+		stop();
+		callback.run();
 	}
 
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.context.Lifecycle#start()
+	 */
 	@Override
 	public void start() {
 
@@ -81,7 +108,7 @@ class DefaultMessageListenerContainer implements MessageListenerContainer {
 
 			if (!this.running) {
 
-				for (Subscription subscription : subscriptions) {
+				for (Subscription subscription : subscriptions.values()) {
 
 					if (!subscription.isActive()) {
 						if (subscription instanceof TaskSubscription) {
@@ -94,13 +121,17 @@ class DefaultMessageListenerContainer implements MessageListenerContainer {
 		}
 	}
 
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.context.Lifecycle#stop()
+	 */
 	@Override
 	public void stop() {
 
 		synchronized (lifecycleMonitor) {
 
 			if (this.running) {
-				for (Subscription subscription : subscriptions) {
+				for (Subscription subscription : subscriptions.values()) {
 					subscription.cancel();
 				}
 				running = false;
@@ -108,6 +139,10 @@ class DefaultMessageListenerContainer implements MessageListenerContainer {
 		}
 	}
 
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.context.Lifecycle#isRunning()
+	 */
 	@Override
 	public boolean isRunning() {
 
@@ -116,24 +151,61 @@ class DefaultMessageListenerContainer implements MessageListenerContainer {
 		}
 	}
 
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.context.Phased#getPhase()
+	 */
 	@Override
 	public int getPhase() {
 		return this.phase;
 	}
 
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.data.mongodb.monitor.MessageListenerContainer#register(org.springframework.data.mongodb.monitor.SubscriptionRequest, java.lang.Class)
+	 */
 	@Override
 	public <T, M extends Message<?, ? super T>> Subscription register(
 			SubscriptionRequest<M, ? extends RequestOptions> request, Class<T> bodyType) {
 
-		return register(taskFactory.forRequest(request, bodyType));
+		return register(request, bodyType, errorHandler.orElseGet(
+				() -> new DecoratingLoggingErrorHandler((exception) -> lookup(request).ifPresent(Subscription::cancel))));
 	}
 
-	public Subscription register(Task task) {
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.data.mongodb.monitor.MessageListenerContainer#register(org.springframework.data.mongodb.monitor.SubscriptionRequest, java.lang.Class, org.springframework.util.ErrorHandler)
+	 */
+	@Override
+	public <T, M extends Message<?, ? super T>> Subscription register(
+			SubscriptionRequest<M, ? extends RequestOptions> request, Class<T> bodyType, ErrorHandler errorHandler) {
+
+		return register(request, taskFactory.forRequest(request, bodyType, errorHandler));
+	}
+
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.data.mongodb.monitor.MessageListenerContainer#lookup(org.springframework.data.mongodb.monitor.SubscriptionRequest)
+	 */
+	@Override
+	public Optional<Subscription> lookup(SubscriptionRequest<?, ?> request) {
+		synchronized (lifecycleMonitor) {
+			return Optional.ofNullable(subscriptions.get(request));
+		}
+	}
+
+	public Subscription register(SubscriptionRequest request, Task task) {
 
 		Subscription subscription = new TaskSubscription(task);
 
 		synchronized (lifecycleMonitor) {
-			this.subscriptions.add(subscription);
+
+			if (subscriptions.containsKey(request)) {
+				return subscriptions.get(request);
+			}
+
+			this.subscriptions.put(request, subscription);
+
 			if (this.running) {
 				taskExecutor.execute(task);
 			}
@@ -142,18 +214,22 @@ class DefaultMessageListenerContainer implements MessageListenerContainer {
 		return subscription;
 	}
 
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.data.mongodb.monitor.MessageListenerContainer#remove(org.springframework.data.mongodb.monitor.Subscription)
+	 */
 	@Override
 	public void remove(Subscription subscription) {
 
 		synchronized (lifecycleMonitor) {
 
-			if (subscriptions.contains(subscription)) {
+			if (subscriptions.containsValue(subscription)) {
 
 				if (subscription.isActive()) {
 					subscription.cancel();
 				}
 
-				subscriptions.remove(subscription);
+				subscriptions.values().remove(subscription);
 			}
 		}
 	}
@@ -185,4 +261,27 @@ class DefaultMessageListenerContainer implements MessageListenerContainer {
 			task.cancel();
 		}
 	}
+
+	/**
+	 * @author Christoph Strobl
+	 * @since 2.1
+	 */
+	@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
+	private static class DecoratingLoggingErrorHandler implements ErrorHandler {
+
+		private final Log logger = LogFactory.getLog(DecoratingLoggingErrorHandler.class);
+
+		private final ErrorHandler delegate;
+
+		@Override
+		public void handleError(Throwable t) {
+
+			if (logger.isErrorEnabled()) {
+				logger.error("Unexpected error occurred while listening to MongoDB.", t);
+			}
+
+			delegate.handleError(t);
+		}
+	}
+
 }

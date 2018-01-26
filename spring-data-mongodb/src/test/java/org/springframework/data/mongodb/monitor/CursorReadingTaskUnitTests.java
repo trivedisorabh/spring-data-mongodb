@@ -38,6 +38,7 @@ import org.springframework.data.mongodb.monitor.TaskFactory.CursorReadingTask;
 import com.mongodb.ServerAddress;
 import com.mongodb.ServerCursor;
 import com.mongodb.client.MongoCursor;
+import org.springframework.util.ErrorHandler;
 
 /**
  * Unit test for mainly lifecycle issues of {@link CursorReadingTask}.
@@ -53,6 +54,7 @@ public class CursorReadingTaskUnitTests {
 	@Mock MessageListener listener;
 	@Mock RequestOptions options;
 	@Mock MongoTemplate template;
+	@Mock ErrorHandler errorHandler;
 
 	ValueCapturingTaskStub task;
 
@@ -65,7 +67,7 @@ public class CursorReadingTaskUnitTests {
 		when(template.getDb()).thenReturn(db);
 		when(db.getName()).thenReturn("mock-db");
 
-		task = new ValueCapturingTaskStub(template, request, Object.class, cursor);
+		task = new ValueCapturingTaskStub(template, request, Object.class, cursor, errorHandler);
 	}
 
 	@Test // DATAMONGO-1803
@@ -199,9 +201,9 @@ public class CursorReadingTaskUnitTests {
 		final List<Object> values = new CopyOnWriteArrayList();
 
 		public ValueCapturingTaskStub(MongoTemplate template, SubscriptionRequest request, Class<?> targetType,
-				MongoCursor cursor) {
+				MongoCursor cursor, ErrorHandler errorHandler) {
 
-			super(template, request, targetType);
+			super(template, request, targetType, errorHandler);
 			this.cursor = cursor;
 		}
 

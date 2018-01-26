@@ -27,6 +27,7 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.util.ErrorHandler;
 
 /**
  * Unit tests for {@link DefaultMessageListenerContainer}.
@@ -37,6 +38,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 public class DefaultMessageListenerContainerUnitTests {
 
 	@Mock MongoTemplate template;
+	@Mock ErrorHandler errorHandler;
 
 	DefaultMessageListenerContainer container;
 
@@ -72,7 +74,7 @@ public class DefaultMessageListenerContainerUnitTests {
 
 	@Test // DATAMONGO-1803
 	public void removeSubscriptionWhileRunning() throws Throwable {
-		runOnce(new StopSubscriptionWhileRunning(container));
+		runOnce(new RemoveSubscriptionWhileRunning(container));
 	}
 
 	private static class RemoveSubscriptionWhileRunning extends MultithreadedTestCase {
@@ -82,7 +84,7 @@ public class DefaultMessageListenerContainerUnitTests {
 
 		public RemoveSubscriptionWhileRunning(DefaultMessageListenerContainer container) {
 			this.container = container;
-			subscription = container.register(new MockTask());
+			subscription = container.register(new MockSubscriptionRequest(), new MockTask());
 		}
 
 		public void thread1() {
@@ -112,7 +114,7 @@ public class DefaultMessageListenerContainerUnitTests {
 
 		public StopSubscriptionWhileRunning(DefaultMessageListenerContainer container) {
 			this.container = container;
-			subscription = container.register(new MockTask());
+			subscription = container.register(new MockSubscriptionRequest(), new MockTask());
 		}
 
 		public void thread1() {
@@ -156,7 +158,7 @@ public class DefaultMessageListenerContainerUnitTests {
 		public void thread2() throws InterruptedException {
 
 			waitForTick(1);
-			Subscription subscription = container.register(new MockTask());
+			Subscription subscription = container.register(new MockSubscriptionRequest(), new MockTask());
 			Thread.sleep(10);
 			assertThat(subscription.isActive()).isTrue();
 
@@ -178,7 +180,7 @@ public class DefaultMessageListenerContainerUnitTests {
 
 			assertTick(0);
 
-			Subscription subscription = container.register(new MockTask());
+			Subscription subscription = container.register(new MockSubscriptionRequest(), new MockTask());
 			assertThat(subscription.isActive()).isFalse();
 
 			waitForTick(2);
@@ -226,7 +228,8 @@ public class DefaultMessageListenerContainerUnitTests {
 	static class MockTask implements Task {
 
 		volatile State state;
-		
+		volatile RuntimeException error;
+
 		@Override
 		public void cancel() throws DataAccessResourceFailureException {
 			state = State.CANCELLED;
@@ -246,14 +249,37 @@ public class DefaultMessageListenerContainerUnitTests {
 		public void run() {
 
 			state = State.RUNNING;
-			
+
 			while (isActive()) {
+
+				if (error != null) {
+					throw error;
+				}
+
 				try {
 					Thread.sleep(10);
 				} catch (InterruptedException e) {
 					Thread.interrupted();
 				}
 			}
+		}
+
+		void emitError(RuntimeException error) {
+			this.error = error;
+		}
+
+	}
+
+	static class MockSubscriptionRequest implements SubscriptionRequest {
+
+		@Override
+		public MessageListener getMessageListener() {
+			return message -> {};
+		}
+
+		@Override
+		public RequestOptions getRequestOptions() {
+			return () -> "foo";
 		}
 	}
 }

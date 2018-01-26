@@ -33,6 +33,7 @@ import org.springframework.data.mongodb.monitor.TaskFactory.ChangeStreamTask;
 import com.mongodb.client.ChangeStreamIterable;
 import com.mongodb.client.MongoCollection;
 import org.springframework.data.mongodb.monitor.TaskFactory.TailableCursorTask;
+import org.springframework.util.ErrorHandler;
 
 /**
  * Unit tests for {@link TaskFactory}.
@@ -45,6 +46,7 @@ public class TaskFactoryUnitTests {
 	@Mock MongoConverter converter;
 	@Mock MongoTemplate template;
 	@Mock MessageListener<Message> messageListener;
+	@Mock ErrorHandler errorHandler;
 
 	TaskFactory factory;
 
@@ -57,14 +59,14 @@ public class TaskFactoryUnitTests {
 
 	@Test(expected = IllegalArgumentException.class) // DATAMONGO-1803
 	public void requestMustNotBeNull() {
-		factory.forRequest(null, Object.class);
+		factory.forRequest(null, Object.class, errorHandler);
 	}
 
 	@Test // DATAMONGO-1803
 	public void createsChangeStreamRequestCorrectly() {
 
 		ChangeStreamRequestOptions options = Mockito.mock(ChangeStreamRequestOptions.class);
-		Task task = factory.forRequest(new ChangeStreamRequest(messageListener, options), Object.class);
+		Task task = factory.forRequest(new ChangeStreamRequest(messageListener, options), Object.class, errorHandler);
 
 		assertThat(task).isInstanceOf(ChangeStreamTask.class);
 	}
@@ -74,7 +76,7 @@ public class TaskFactoryUnitTests {
 
 		RequestOptions options = Mockito.mock(RequestOptions.class);
 		when(options.getCollectionName()).thenReturn("collection-1");
-		Task task = factory.forRequest(new TailableCursorRequest(messageListener, options), Object.class);
+		Task task = factory.forRequest(new TailableCursorRequest(messageListener, options), Object.class, errorHandler);
 
 		assertThat(task).isInstanceOf(TailableCursorTask.class);
 	}

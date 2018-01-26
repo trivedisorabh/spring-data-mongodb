@@ -41,6 +41,7 @@ import org.springframework.data.mongodb.monitor.TailableCursorRequest.TailableCu
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
+import org.springframework.util.ErrorHandler;
 
 import com.mongodb.CursorType;
 import com.mongodb.client.ChangeStreamIterable;
@@ -66,7 +67,6 @@ class TaskFactory {
 	TaskFactory(MongoTemplate template) {
 
 		Assert.notNull(template, "Template must not be null!");
-
 		this.tempate = template;
 	}
 
@@ -74,18 +74,20 @@ class TaskFactory {
 	 * Create a {@link Task} for the given {@link SubscriptionRequest}.
 	 *
 	 * @param request must not be {@literal null}.
+	 * @param targetType must not be {@literal null}.
+	 * @param errorHandler must not be {@literal null}.
 	 * @return must not be {@literal null}. Consider {@code Object.class}.
 	 * @throws IllegalArgumentException in case the {@link SubscriptionRequest} is unknown.
 	 */
-	Task forRequest(SubscriptionRequest<?, ?> request, Class<?> targetType) {
+	Task forRequest(SubscriptionRequest<?, ?> request, Class<?> targetType, ErrorHandler errorHandler) {
 
 		Assert.notNull(request, "Request must not be null!");
 		Assert.notNull(targetType, "TargetType must not be null!");
 
 		if (request instanceof ChangeStreamRequest) {
-			return new ChangeStreamTask(tempate, (ChangeStreamRequest) request, targetType);
+			return new ChangeStreamTask(tempate, (ChangeStreamRequest) request, targetType, errorHandler);
 		} else if (request instanceof TailableCursorRequest) {
-			return new TailableCursorTask(tempate, (TailableCursorRequest) request, targetType);
+			return new TailableCursorTask(tempate, (TailableCursorRequest) request, targetType, errorHandler);
 		}
 
 		throw new IllegalArgumentException(
@@ -108,16 +110,20 @@ class TaskFactory {
 
 		private MongoCursor<T> cursor;
 
+		private final ErrorHandler errorHandler;
+
 		/**
 		 * @param template must not be {@literal null}.
 		 * @param request must not be {@literal null}.
 		 * @param targetType must not be {@literal null}.
 		 */
-		public CursorReadingTask(MongoTemplate template, SubscriptionRequest request, Class<?> targetType) {
+		public CursorReadingTask(MongoTemplate template, SubscriptionRequest request, Class<?> targetType,
+				ErrorHandler errorHandler) {
 
 			this.template = template;
 			this.request = request;
 			this.targetType = targetType;
+			this.errorHandler = errorHandler;
 		}
 
 		/* 
@@ -137,10 +143,19 @@ class TaskFactory {
 					} else {
 						Thread.sleep(10);
 					}
-				} catch (IllegalStateException e) {
-					e.printStackTrace();
 				} catch (InterruptedException e) {
 					Thread.interrupted();
+				} catch (Exception e) {
+
+					Exception toHandle = e;
+
+					if (e instanceof RuntimeException) {
+
+						Exception translated = template.getExceptionTranslator().translateExceptionIfPossible((RuntimeException) e);
+						toHandle = translated != null ? translated : e;
+					}
+
+					errorHandler.handleError(toHandle);
 				}
 			}
 		}
@@ -215,6 +230,7 @@ class TaskFactory {
 
 		@Override
 		public State getState() {
+
 			synchronized (lifecycleMonitor) {
 				return state;
 			}
@@ -279,8 +295,9 @@ class TaskFactory {
 
 		private final QueryMapper queryMapper;
 
-		ChangeStreamTask(MongoTemplate template, ChangeStreamRequest request, Class<?> targetType) {
-			super(template, request, targetType);
+		ChangeStreamTask(MongoTemplate template, ChangeStreamRequest request, Class<?> targetType,
+				ErrorHandler errorHandler) {
+			super(template, request, targetType, errorHandler);
 
 			queryMapper = new QueryMapper(template.getConverter());
 		}
@@ -425,8 +442,9 @@ class TaskFactory {
 
 		private QueryMapper queryMapper;
 
-		public TailableCursorTask(MongoTemplate template, TailableCursorRequest request, Class<?> targetType) {
-			super(template, request, targetType);
+		public TailableCursorTask(MongoTemplate template, TailableCursorRequest request, Class<?> targetType,
+				ErrorHandler errorHandler) {
+			super(template, request, targetType, errorHandler);
 			queryMapper = new QueryMapper(template.getConverter());
 		}
 
