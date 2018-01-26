@@ -70,9 +70,10 @@ public class TaskFactoryUnitTests {
 	}
 
 	@Test // DATAMONGO-1803
-	public void createstailableRequestCorrectly() {
+	public void createsTailableRequestCorrectly() {
 
 		RequestOptions options = Mockito.mock(RequestOptions.class);
+		when(options.getCollectionName()).thenReturn("collection-1");
 		Task task = factory.forRequest(new TailableCursorRequest(messageListener, options), Object.class);
 
 		assertThat(task).isInstanceOf(TailableCursorTask.class);

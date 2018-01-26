@@ -26,7 +26,7 @@ import java.util.List;
  */
 class SubscriptionUtils {
 
-	static final Duration DEFAULT_TIMEOUT = Duration.ofMillis(500);
+	static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(1);
 
 	/**
 	 * Wait for {@link Subscription#isActive() to become active} but not longer than {@link #DEFAULT_TIMEOUT}.

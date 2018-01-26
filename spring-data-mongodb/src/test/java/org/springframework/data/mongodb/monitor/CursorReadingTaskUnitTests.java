@@ -19,6 +19,7 @@ import static edu.umd.cs.mtc.TestFramework.*;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import com.mongodb.client.MongoDatabase;
 import edu.umd.cs.mtc.MultithreadedTestCase;
 
 import java.util.List;
@@ -46,6 +47,7 @@ import com.mongodb.client.MongoCursor;
 @RunWith(MockitoJUnitRunner.class)
 public class CursorReadingTaskUnitTests {
 
+	@Mock MongoDatabase db;
 	@Mock MongoCursor cursor;
 	@Mock SubscriptionRequest request;
 	@Mock MessageListener listener;
@@ -60,6 +62,8 @@ public class CursorReadingTaskUnitTests {
 		when(request.getRequestOptions()).thenReturn(options);
 		when(request.getMessageListener()).thenReturn(listener);
 		when(options.getCollectionName()).thenReturn("collection-name");
+		when(template.getDb()).thenReturn(db);
+		when(db.getName()).thenReturn("mock-db");
 
 		task = new ValueCapturingTaskStub(template, request, Object.class, cursor);
 	}

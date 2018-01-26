@@ -33,6 +33,7 @@ import org.springframework.data.mongodb.core.aggregation.TypeBasedAggregationOpe
 import org.springframework.data.mongodb.core.aggregation.TypedAggregation;
 import org.springframework.data.mongodb.core.convert.MongoConverter;
 import org.springframework.data.mongodb.core.convert.QueryMapper;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.monitor.ChangeStreamRequest.ChangeStreamRequestOptions;
 import org.springframework.data.mongodb.monitor.Message.MessageProperties;
 import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
@@ -43,6 +44,7 @@ import org.springframework.util.ClassUtils;
 
 import com.mongodb.CursorType;
 import com.mongodb.client.ChangeStreamIterable;
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.Collation;
 import com.mongodb.client.model.changestream.ChangeStreamDocument;
@@ -230,8 +232,8 @@ class TaskFactory {
 		 * @return never {@literal null}.
 		 */
 		protected Message doCreateMessage(T source, RequestOptions options) {
-			return new SimpleMessage(source, source,
-					MessageProperties.builder().collectionName(options.getCollectionName()).build());
+			return new SimpleMessage(source, source, MessageProperties.builder().databaseName(template.getDb().getName())
+					.collectionName(options.getCollectionName()).build());
 		}
 
 		private boolean isRunning() {
@@ -432,16 +434,31 @@ class TaskFactory {
 		protected MongoCursor<Document> initCursor(MongoTemplate template, RequestOptions options, Class<?> targetType) {
 
 			Document filter = new Document();
-			if (options instanceof TailableCursorRequestOptions) {
-				TailableCursorRequestOptions tcro = (TailableCursorRequestOptions) options;
-				tcro.getQuery().ifPresent(q -> filter.putAll(queryMapper.getMappedObject(q.getQueryObject(),
-						template.getConverter().getMappingContext().getPersistentEntity(Object.class))));
+			Collation collation = null;
 
-				// TODO: collations
+			if (options instanceof TailableCursorRequestOptions) {
+
+				TailableCursorRequestOptions requestOptions = (TailableCursorRequestOptions) options;
+				if (requestOptions.getQuery().isPresent()) {
+
+					Query query = requestOptions.getQuery().get();
+
+					filter.putAll(queryMapper.getMappedObject(query.getQueryObject(), template.getConverter().getMappingContext()
+							.getPersistentEntity(targetType.equals(Document.class) ? Object.class : targetType)));
+
+					collation = query.getCollation().map(org.springframework.data.mongodb.core.query.Collation::toMongoCollation)
+							.orElse(null);
+				}
 			}
 
-			return template.getCollection(options.getCollectionName()).find(filter).cursorType(CursorType.TailableAwait)
-					.noCursorTimeout(true).iterator();
+			FindIterable<Document> iterable = template.getCollection(options.getCollectionName()).find(filter)
+					.cursorType(CursorType.TailableAwait).noCursorTimeout(true);
+
+			if (collation != null) {
+				iterable = iterable.collation(collation);
+			}
+
+			return iterable.iterator();
 		}
 
 	}

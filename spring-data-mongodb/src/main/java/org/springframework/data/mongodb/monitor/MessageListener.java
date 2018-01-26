@@ -15,10 +15,8 @@
  */
 package org.springframework.data.mongodb.monitor;
 
-import org.springframework.context.ApplicationEventPublisher;
-
 /**
- * Listener interface to receive asynchronous delivery of {@link Message Messages}.
+ * Listener interface to receive delivery of {@link Message Messages}.
  *
  * @author Christoph Strobl
  * @since 2.1
@@ -26,24 +24,10 @@ import org.springframework.context.ApplicationEventPublisher;
 @FunctionalInterface
 interface MessageListener<M extends Message> {
 
+	/**
+	 * Callback invoked on receiving {@link Message}.
+	 *
+	 * @param message never {@literal null}.
+	 */
 	void onMessage(M message);
-
-	static class DecoratingEventPublishingMessageListener<T extends Message> implements MessageListener<T> {
-
-		private final ApplicationEventPublisher publisher;
-		private final MessageListener<T> delegate;
-
-		public DecoratingEventPublishingMessageListener(MessageListener<T> delegate, ApplicationEventPublisher publisher) {
-
-			this.publisher = publisher;
-			this.delegate = delegate;
-		}
-
-		@Override
-		public void onMessage(T message) {
-
-			// TODO: pass on event via publisher
-			this.delegate.onMessage(message);
-		}
-	}
 }
