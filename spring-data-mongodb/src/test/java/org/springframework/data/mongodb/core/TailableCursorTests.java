@@ -13,11 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.springframework.data.mongodb.monitor;
+package org.springframework.data.mongodb.core;
 
 import static org.springframework.data.mongodb.core.query.Criteria.*;
 import static org.springframework.data.mongodb.core.query.Query.*;
-import static org.springframework.data.mongodb.monitor.SubscriptionUtils.*;
+import static org.springframework.data.mongodb.core.SubscriptionUtils.*;
 import static org.springframework.data.mongodb.test.util.Assertions.*;
 
 import lombok.Data;
@@ -27,11 +27,9 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.CollectionOptions;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Field;
-import org.springframework.data.mongodb.monitor.Message.MessageProperties;
-import org.springframework.data.mongodb.monitor.TailableCursorRequest.TailableCursorRequestOptions;
+import org.springframework.data.mongodb.core.Message.MessageProperties;
+import org.springframework.data.mongodb.core.TailableCursorRequest.TailableCursorRequestOptions;
 
 import com.mongodb.MongoClient;
 

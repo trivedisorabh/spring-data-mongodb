@@ -18,6 +18,7 @@ package org.springframework.data.mongodb.core;
 import static org.springframework.data.mongodb.core.query.Criteria.*;
 import static org.springframework.data.mongodb.core.query.SerializationUtils.*;
 
+import lombok.Data;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
@@ -76,6 +77,7 @@ import org.springframework.data.mongodb.ReactiveMongoDatabaseFactory;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOperationContext;
 import org.springframework.data.mongodb.core.aggregation.AggregationOptions;
+import org.springframework.data.mongodb.core.aggregation.PrefixingDelegatingAggregationOperationContext;
 import org.springframework.data.mongodb.core.aggregation.TypeBasedAggregationOperationContext;
 import org.springframework.data.mongodb.core.aggregation.TypedAggregation;
 import org.springframework.data.mongodb.core.convert.*;
@@ -128,9 +130,12 @@ import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.ValidationOptions;
+import com.mongodb.client.model.changestream.ChangeStreamDocument;
+import com.mongodb.client.model.changestream.FullDocument;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import com.mongodb.reactivestreams.client.AggregatePublisher;
+import com.mongodb.reactivestreams.client.ChangeStreamPublisher;
 import com.mongodb.reactivestreams.client.DistinctPublisher;
 import com.mongodb.reactivestreams.client.FindPublisher;
 import com.mongodb.reactivestreams.client.MongoClient;
@@ -1786,6 +1791,108 @@ public class ReactiveMongoTemplate implements ReactiveMongoOperations, Applicati
 				new TailingQueryFindPublisherPreparer(query, entityClass));
 	}
 
+	// --> Change Streams
+
+	public <T> Flux<ChangeStreamEvent<T>> changeStream(Class<T> resultType, ChangeStreamOptions options) {
+		return changeStream(null, resultType, options);
+	}
+
+	public <T> Flux<ChangeStreamEvent<T>> changeStream(@Nullable Aggregation filter, Class<T> resultType,
+			ChangeStreamOptions options) {
+
+		Class<?> domainType = filter instanceof TypedAggregation ? ((TypedAggregation) filter).getInputType() : resultType;
+
+		return changeStream(filter, resultType, options, getCollectionName(domainType));
+	}
+
+	@Override
+	public <T> Flux<ChangeStreamEvent<T>> changeStream(@Nullable Aggregation filter, Class<T> resultType,
+			ChangeStreamOptions options, String collectionName) {
+
+		if (filter == null) {
+			return changeStream(Collections.emptyList(), resultType, options, collectionName);
+		}
+
+		AggregationOperationContext context = filter instanceof TypedAggregation ? new TypeBasedAggregationOperationContext(
+				((TypedAggregation) filter).getInputType(), mappingContext, queryMapper) : Aggregation.DEFAULT_CONTEXT;
+
+		return changeStream(filter.toPipeline(new PrefixingDelegatingAggregationOperationContext(context, "fullDocument")),
+				resultType, options, collectionName);
+	}
+
+	@Override
+	public <T> Flux<ChangeStreamEvent<T>> changeStream(List<Document> filter, Class<T> resultType,
+			ChangeStreamOptions options, String collectionName) {
+
+		ChangeStreamPublisher<Document> publisher = filter.isEmpty() ? getCollection(collectionName).watch()
+				: getCollection(collectionName).watch(filter);
+
+		if (options.getResumeToken().isPresent()) {
+			publisher = publisher.resumeAfter(options.getResumeToken().get().asDocument());
+		}
+
+		if (options.getFullDocumentLookup().isPresent() || resultType != Document.class) {
+			publisher = publisher.fullDocument(options.getFullDocumentLookup().isPresent()
+					? options.getFullDocumentLookup().get() : FullDocument.UPDATE_LOOKUP);
+		}
+
+		if (options.getCollation().isPresent()) {
+			publisher = publisher.collation(options.getCollation().map(Collation::toMongoCollation).get());
+		}
+		return Flux.from(publisher).map(document -> new ChangeStreamEvent(document, resultType, getConverter()));
+	}
+
+	@Data // TODO make public, move and joind with LazyMappingDelegatingMessage
+	static class ChangeStreamEvent<T> implements Message<ChangeStreamDocument<Document>, T> {
+
+		ChangeStreamDocument<Document> raw;
+
+		private final Class<T> targetType;
+		private final MongoConverter converter;
+
+		public ChangeStreamEvent(ChangeStreamDocument<Document> raw, Class<T> targetType, MongoConverter converter) {
+
+			this.raw = raw;
+			this.targetType = targetType;
+			this.converter = converter;
+		}
+
+		@Nullable
+		public ChangeStreamDocument<Document> getRaw() {
+			return raw;
+		}
+
+		public T getBody() {
+
+			// TODO: chache result
+
+			if (raw == null || raw.getFullDocument() == null || targetType.equals(raw.getClass())) {
+				return targetType.cast(raw);
+			}
+
+			if (ClassUtils.isAssignable(Document.class, raw.getFullDocument().getClass())) {
+				return converter.read(targetType, raw.getFullDocument());
+			}
+
+			if (converter.getConversionService().canConvert(raw.getFullDocument().getClass(), targetType)) {
+				return converter.getConversionService().convert(raw.getFullDocument(), targetType);
+			}
+
+			throw new IllegalArgumentException(String.format("No converter found capable of converting %s to %s",
+					raw.getFullDocument().getClass(), targetType));
+		}
+
+		@Override
+		public MessageProperties getMessageProperties() {
+			return MessageProperties.empty();
+		}
+
+		@Override
+		public String toString() {
+			return "ChangeStreamEvent {" + "raw=" + raw + ", targetType=" + targetType + '}';
+		}
+	}
+
 	/*
 	 * (non-Javadoc)
 	 * @see org.springframework.data.mongodb.core.ReactiveFindOperation#query(java.lang.Class)
@@ -2605,7 +2712,6 @@ public class ReactiveMongoTemplate implements ReactiveMongoOperations, Applicati
 	 *
 	 * @author Mark Paluch
 	 */
-
 	interface ReactiveCollectionQueryCallback<T> extends ReactiveCollectionCallback<T> {
 
 		FindPublisher<T> doInCollection(MongoCollection<Document> collection) throws MongoException, DataAccessException;

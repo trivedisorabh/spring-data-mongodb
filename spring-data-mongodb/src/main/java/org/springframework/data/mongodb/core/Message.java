@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.springframework.data.mongodb.monitor;
+package org.springframework.data.mongodb.core;
 
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
@@ -35,7 +35,7 @@ import org.springframework.util.Assert;
  * @see MessageProperties
  * @since 2.1
  */
-interface Message<S, T> {
+public interface Message<S, T> {
 
 	/**
 	 * The raw message source as emitted by the origin.
@@ -118,7 +118,7 @@ interface Message<S, T> {
 
 			private MessageProperties properties = new MessageProperties();
 
-			MessagePropertiesBuilder databaseName(String dbName) {
+			public MessagePropertiesBuilder databaseName(String dbName) {
 
 				Assert.notNull(dbName, "DbName must not be null!");
 
@@ -126,7 +126,7 @@ interface Message<S, T> {
 				return this;
 			}
 
-			MessagePropertiesBuilder collectionName(String collectionName) {
+			public MessagePropertiesBuilder collectionName(String collectionName) {
 
 				Assert.notNull(collectionName, "CollectionName must not be null!");
 
@@ -134,7 +134,7 @@ interface Message<S, T> {
 				return this;
 			}
 
-			MessageProperties build() {
+			public MessageProperties build() {
 
 				MessageProperties properties = this.properties;
 				this.properties = new MessageProperties();

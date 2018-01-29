@@ -13,12 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.springframework.data.mongodb.monitor;
+package org.springframework.data.mongodb.core;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
-import static org.springframework.data.mongodb.monitor.SubscriptionUtils.*;
+import static org.springframework.data.mongodb.core.SubscriptionUtils.*;
 
 import lombok.Data;
 
@@ -34,8 +34,6 @@ import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.MongoDbFactory;
-import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.SimpleMongoDbFactory;
 import org.springframework.data.mongodb.test.util.ReplicaSet;
 import org.springframework.test.annotation.IfProfileValue;
 import org.springframework.util.ErrorHandler;

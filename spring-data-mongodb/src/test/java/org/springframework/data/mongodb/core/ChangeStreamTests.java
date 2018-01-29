@@ -13,13 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.springframework.data.mongodb.monitor;
+package org.springframework.data.mongodb.core;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.springframework.data.mongodb.core.SubscriptionUtils.*;
 import static org.springframework.data.mongodb.core.aggregation.Aggregation.*;
 import static org.springframework.data.mongodb.core.query.Criteria.*;
 import static org.springframework.data.mongodb.core.query.Query.*;
-import static org.springframework.data.mongodb.monitor.SubscriptionUtils.*;
 
 import lombok.Data;
 
@@ -34,13 +34,12 @@ import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.rules.TestRule;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.ChangeStreamRequest.ChangeStreamRequestOptions;
+import org.springframework.data.mongodb.core.Message.MessageProperties;
+import org.springframework.data.mongodb.core.SubscriptionUtils.*;
 import org.springframework.data.mongodb.core.mapping.Field;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Update;
-import org.springframework.data.mongodb.monitor.ChangeStreamRequest.ChangeStreamRequestOptions;
-import org.springframework.data.mongodb.monitor.Message.MessageProperties;
-import org.springframework.data.mongodb.monitor.SubscriptionUtils.*;
 import org.springframework.data.mongodb.test.util.ReplicaSet;
 
 import com.mongodb.MongoClient;
@@ -120,8 +119,8 @@ public class ChangeStreamTests {
 	public void useSimpleAggregationToFilterMessages() throws InterruptedException {
 
 		CollectingMessageListener<Message<ChangeStreamDocument<Document>, User>> messageListener = new CollectingMessageListener<>();
-		ChangeStreamRequest<User> request = new ChangeStreamRequest<>(messageListener, ChangeStreamRequestOptions.builder()
-				.collection("user").filter(newAggregation(match(where("age").is(7)))).build());
+		ChangeStreamRequest<User> request = new ChangeStreamRequest<>(messageListener, new ChangeStreamRequestOptions(
+				"user", ChangeStreamOptions.builder().filter(newAggregation(match(where("age").is(7)))).build()));
 
 		Subscription subscription = container.register(request, User.class);
 		awaitSubscription(subscription);
@@ -143,10 +142,10 @@ public class ChangeStreamTests {
 
 		CollectingMessageListener<Message<ChangeStreamDocument<Document>, User>> messageListener = new CollectingMessageListener<>();
 		ChangeStreamRequest<User> request = new ChangeStreamRequest<>(messageListener,
-				ChangeStreamRequestOptions.builder().collection("user")
-						.filter(newAggregation(match(
+				new ChangeStreamRequestOptions("user",
+						ChangeStreamOptions.builder().filter(newAggregation(match(
 								new Criteria().orOperator(where("user_name").is("huffyFluffy"), where("user_name").is("jellyBelly")))))
-						.build());
+								.build()));
 
 		Subscription subscription = container.register(request, User.class);
 		awaitSubscription(subscription);
@@ -167,11 +166,11 @@ public class ChangeStreamTests {
 	public void mapsTypedAggregationToFilterMessages() throws InterruptedException {
 
 		CollectingMessageListener<Message<ChangeStreamDocument<Document>, User>> messageListener = new CollectingMessageListener<>();
-		ChangeStreamRequest<User> request = new ChangeStreamRequest<>(messageListener, ChangeStreamRequestOptions.builder()
-				.collection("user")
-				.filter(newAggregation(User.class,
-						match(new Criteria().orOperator(where("userName").is("huffyFluffy"), where("userName").is("jellyBelly")))))
-				.build());
+		ChangeStreamRequest<User> request = new ChangeStreamRequest<>(messageListener,
+				new ChangeStreamRequestOptions("user",
+						ChangeStreamOptions.builder().filter(newAggregation(User.class, match(
+								new Criteria().orOperator(where("userName").is("huffyFluffy"), where("userName").is("jellyBelly")))))
+								.build()));
 
 		Subscription subscription = container.register(request, User.class);
 		awaitSubscription(subscription);
@@ -193,8 +192,8 @@ public class ChangeStreamTests {
 
 		CollectingMessageListener<Message<ChangeStreamDocument<Document>, User>> messageListener = new CollectingMessageListener<>();
 		ChangeStreamRequest<User> request = new ChangeStreamRequest<>(messageListener,
-				ChangeStreamRequestOptions.builder().collection("user")
-						.filter(new Document("$match", new Document("fullDocument.user_name", "sugarSplashy"))).build());
+				new ChangeStreamRequestOptions("user", ChangeStreamOptions.builder()
+						.filter(new Document("$match", new Document("fullDocument.user_name", "sugarSplashy"))).build()));
 
 		Subscription subscription = container.register(request, User.class);
 		awaitSubscription(subscription);
@@ -230,7 +229,7 @@ public class ChangeStreamTests {
 
 		CollectingMessageListener<Message<ChangeStreamDocument<Document>, User>> messageListener2 = new CollectingMessageListener<>();
 		ChangeStreamRequest<User> subSequentRequest = new ChangeStreamRequest<>(messageListener2,
-				ChangeStreamRequestOptions.builder().collection("user").resumeToken(resumeToken).build());
+				new ChangeStreamRequestOptions("user", ChangeStreamOptions.builder().resumeToken(resumeToken).build()));
 
 		Subscription subscription2 = container.register(subSequentRequest, User.class);
 		awaitSubscription(subscription2);
@@ -307,8 +306,8 @@ public class ChangeStreamTests {
 	public void readsOnlyDiffForUpdateWhenOptionsDeclareDefaultExplicitly() throws InterruptedException {
 
 		CollectingMessageListener<Message<ChangeStreamDocument<Document>, User>> messageListener = new CollectingMessageListener<>();
-		ChangeStreamRequest<User> request = new ChangeStreamRequest<>(messageListener,
-				ChangeStreamRequestOptions.builder().collection("user").fullDocumentLookup(FullDocument.DEFAULT).build());
+		ChangeStreamRequest<User> request = new ChangeStreamRequest<>(messageListener, new ChangeStreamRequestOptions(
+				"user", ChangeStreamOptions.builder().fullDocumentLookup(FullDocument.DEFAULT).build()));
 
 		Subscription subscription = container.register(request, User.class);
 		awaitSubscription(subscription);
@@ -328,7 +327,7 @@ public class ChangeStreamTests {
 
 		CollectingMessageListener<Message<ChangeStreamDocument<Document>, Document>> messageListener = new CollectingMessageListener<>();
 		ChangeStreamRequest<Document> request = new ChangeStreamRequest<>(messageListener,
-				ChangeStreamRequestOptions.builder().collection("user").returnFullDocumentOnUpdate().build());
+				new ChangeStreamRequestOptions("user", ChangeStreamOptions.builder().returnFullDocumentOnUpdate().build()));
 
 		Subscription subscription = container.register(request, Document.class);
 		awaitSubscription(subscription);

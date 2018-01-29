@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.springframework.data.mongodb.monitor;
+package org.springframework.data.mongodb.core;
 
 import static edu.umd.cs.mtc.TestFramework.*;
 import static org.assertj.core.api.Assertions.*;
@@ -30,10 +30,13 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
+import org.springframework.data.mongodb.core.Message;
+import org.springframework.data.mongodb.core.MessageListener;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
-import org.springframework.data.mongodb.monitor.Task.State;
-import org.springframework.data.mongodb.monitor.TaskFactory.CursorReadingTask;
+import org.springframework.data.mongodb.core.SubscriptionRequest;
+import org.springframework.data.mongodb.core.SubscriptionRequest.RequestOptions;
+import org.springframework.data.mongodb.core.Task.State;
+import org.springframework.data.mongodb.core.TaskFactory.CursorReadingTask;
 
 import com.mongodb.ServerAddress;
 import com.mongodb.ServerCursor;

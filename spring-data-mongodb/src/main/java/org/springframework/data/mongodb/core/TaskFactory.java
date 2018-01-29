@@ -13,32 +13,27 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.springframework.data.mongodb.monitor;
+package org.springframework.data.mongodb.core;
 
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import org.bson.BsonDocument;
 import org.bson.Document;
 import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.ChangeStreamRequest.ChangeStreamRequestOptions;
+import org.springframework.data.mongodb.core.Message.MessageProperties;
+import org.springframework.data.mongodb.core.SubscriptionRequest.RequestOptions;
+import org.springframework.data.mongodb.core.TailableCursorRequest.TailableCursorRequestOptions;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOperationContext;
-import org.springframework.data.mongodb.core.aggregation.ExposedFields.FieldReference;
-import org.springframework.data.mongodb.core.aggregation.Field;
+import org.springframework.data.mongodb.core.aggregation.PrefixingDelegatingAggregationOperationContext;
 import org.springframework.data.mongodb.core.aggregation.TypeBasedAggregationOperationContext;
 import org.springframework.data.mongodb.core.aggregation.TypedAggregation;
 import org.springframework.data.mongodb.core.convert.MongoConverter;
 import org.springframework.data.mongodb.core.convert.QueryMapper;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.monitor.ChangeStreamRequest.ChangeStreamRequestOptions;
-import org.springframework.data.mongodb.monitor.Message.MessageProperties;
-import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
-import org.springframework.data.mongodb.monitor.TailableCursorRequest.TailableCursorRequestOptions;
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.ClassUtils;
@@ -163,14 +158,13 @@ class TaskFactory {
 		}
 
 		/**
-		 * Initialize the Task by 1st setting the current state to
-		 * {@link org.springframework.data.mongodb.monitor.Task.State#STARTING starting} indicating the initialization
-		 * procedure. <br />
+		 * Initialize the Task by 1st setting the current state to {@link Task.State#STARTING starting} indicating the
+		 * initialization procedure. <br />
 		 * Moving on the underlying {@link MongoCursor} gets {@link #initCursor(MongoTemplate, RequestOptions) created} and
 		 * is {@link #isValidCursor(MongoCursor) health checked}. Once a valid {@link MongoCursor} is created the
-		 * {@link #state} is set to {@link org.springframework.data.mongodb.monitor.Task.State#RUNNING running}. If the
-		 * health check is not passed the {@link MongoCursor} is immediately {@link MongoCursor#close() closed} and a new
-		 * {@link MongoCursor} is requested until a valid one is retrieved or the {@link #state} changes.
+		 * {@link #state} is set to {@link Task.State#RUNNING running}. If the health check is not passed the
+		 * {@link MongoCursor} is immediately {@link MongoCursor#close() closed} and a new {@link MongoCursor} is requested
+		 * until a valid one is retrieved or the {@link #state} changes.
 		 */
 		private void start() {
 
@@ -315,23 +309,23 @@ class TaskFactory {
 
 			if (options instanceof ChangeStreamRequestOptions) {
 
-				ChangeStreamRequestOptions changeStreamRequestOptions = (ChangeStreamRequestOptions) options;
-				filter = prepareFilter(template, changeStreamRequestOptions);
+				ChangeStreamOptions changeStreamOptions = ((ChangeStreamRequestOptions) options).getChangeStreamOptions();
+				filter = prepareFilter(template, changeStreamOptions);
 
-				if (changeStreamRequestOptions.getFilter().isPresent()) {
+				if (changeStreamOptions.getFilter().isPresent()) {
 
-					Object val = changeStreamRequestOptions.getFilter().get();
+					Object val = changeStreamOptions.getFilter().get();
 					if (val instanceof Aggregation) {
 						collation = ((Aggregation) val).getOptions().getCollation()
 								.map(org.springframework.data.mongodb.core.query.Collation::toMongoCollation).orElse(null);
 					}
 				}
 
-				if (changeStreamRequestOptions.getResumeToken().isPresent()) {
-					resumeToken = changeStreamRequestOptions.getResumeToken().get().asDocument();
+				if (changeStreamOptions.getResumeToken().isPresent()) {
+					resumeToken = changeStreamOptions.getResumeToken().get().asDocument();
 				}
 
-				fullDocument = changeStreamRequestOptions.getFullDocumentLookup()
+				fullDocument = changeStreamOptions.getFullDocumentLookup()
 						.orElseGet(() -> ClassUtils.isAssignable(Document.class, targetType) ? FullDocument.DEFAULT
 								: FullDocument.UPDATE_LOOKUP);
 			}
@@ -353,7 +347,7 @@ class TaskFactory {
 			return iterable.iterator();
 		}
 
-		List<Document> prepareFilter(MongoTemplate template, ChangeStreamRequestOptions options) {
+		List<Document> prepareFilter(MongoTemplate template, ChangeStreamOptions options) {
 
 			if (!options.getFilter().isPresent()) {
 				return Collections.emptyList();
@@ -367,7 +361,7 @@ class TaskFactory {
 								template.getConverter().getMappingContext(), queryMapper)
 						: Aggregation.DEFAULT_CONTEXT;
 
-				return agg.toPipeline(new PrefixingDelegatingAggregationOperationContext(context));
+				return agg.toPipeline(new PrefixingDelegatingAggregationOperationContext(context, "fullDocument"));
 			} else if (filter instanceof List) {
 				return (List<Document>) filter;
 			} else {
@@ -385,57 +379,6 @@ class TaskFactory {
 
 			return new SimpleMessage(source, source.getFullDocument(), MessageProperties.builder()
 					.databaseName(namespace.getDatabaseName()).collectionName(namespace.getCollectionName()).build());
-		}
-
-		static class PrefixingDelegatingAggregationOperationContext implements AggregationOperationContext {
-
-			final AggregationOperationContext delegate;
-
-			public PrefixingDelegatingAggregationOperationContext(AggregationOperationContext delegate) {
-				this.delegate = delegate;
-			}
-
-			@Override
-			public Document getMappedObject(Document document) {
-				return prefix(delegate.getMappedObject(document));
-			}
-
-			private Document prefix(Document source) {
-
-				Document result = new Document();
-				for (Map.Entry<String, Object> entry : source.entrySet()) {
-
-					String key = entry.getKey().startsWith("$") ? entry.getKey() : "fullDocument." + entry.getKey();
-					Object value = entry.getValue();
-
-					if (entry.getValue() instanceof Collection) {
-						List tmp = new ArrayList();
-						for (Object o : (Collection) entry.getValue()) {
-							if (o instanceof Document) {
-								tmp.add(prefix((Document) o));
-							} else {
-								tmp.add(o);
-							}
-						}
-						value = tmp;
-					} else if (entry.getValue() instanceof Document) {
-						value = prefix((Document) entry.getValue());
-					}
-
-					result.append(key, value);
-				}
-				return result;
-			}
-
-			@Override
-			public FieldReference getReference(Field field) {
-				return delegate.getReference(field);
-			}
-
-			@Override
-			public FieldReference getReference(String name) {
-				return delegate.getReference(name);
-			}
 		}
 	}
 

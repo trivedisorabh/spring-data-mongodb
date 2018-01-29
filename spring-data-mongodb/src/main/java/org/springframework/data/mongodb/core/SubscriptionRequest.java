@@ -13,9 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.springframework.data.mongodb.monitor;
+package org.springframework.data.mongodb.core;
 
-import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
+import org.springframework.data.mongodb.core.SubscriptionRequest.RequestOptions;
 
 /**
  * The actual {@link SubscriptionRequest} sent to the {@link MessageListenerContainer}. This wrapper type allows passing

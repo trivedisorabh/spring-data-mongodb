@@ -13,13 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.springframework.data.mongodb.monitor;
+package org.springframework.data.mongodb.core;
 
 import java.util.Optional;
 
 import org.bson.Document;
+import org.springframework.data.mongodb.core.SubscriptionRequest.RequestOptions;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 
@@ -77,14 +77,12 @@ public class TailableCursorRequest<T> implements SubscriptionRequest<Message<Doc
 	}
 
 	/**
-	 * {@link org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions} implementation specific to a
-	 * {@link TailableCursorRequest}.
+	 * {@link SubscriptionRequest.RequestOptions} implementation specific to a {@link TailableCursorRequest}.
 	 *
 	 * @author Christoph Strobl
 	 * @since 2.1
 	 */
-	public static class TailableCursorRequestOptions
-			implements org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions {
+	public static class TailableCursorRequestOptions implements SubscriptionRequest.RequestOptions {
 
 		private String collectionName;
 		private @Nullable Query query;

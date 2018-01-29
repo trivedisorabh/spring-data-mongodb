@@ -13,21 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.springframework.data.mongodb.monitor;
+package org.springframework.data.mongodb.core;
 
 /**
- * Listener interface to receive delivery of {@link Message Messages}.
- *
  * @author Christoph Strobl
  * @since 2.1
  */
-@FunctionalInterface
-interface MessageListener<M extends Message> {
+interface Subscription extends Cancelable {
 
 	/**
-	 * Callback invoked on receiving {@link Message}.
-	 *
-	 * @param message never {@literal null}.
+	 * @return {@literal true} if the subscription is currently executed.
 	 */
-	void onMessage(M message);
+	boolean isActive();
 }

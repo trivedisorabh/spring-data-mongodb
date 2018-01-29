@@ -19,11 +19,13 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.Collection;
+import java.util.List;
 
 import org.bson.Document;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 import org.springframework.data.geo.GeoResult;
+import org.springframework.data.mongodb.core.ReactiveMongoTemplate.ChangeStreamEvent;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOptions;
 import org.springframework.data.mongodb.core.aggregation.TypedAggregation;
@@ -1107,6 +1109,50 @@ public interface ReactiveMongoOperations extends ReactiveFluentMongoOperations {
 	 * @return the {@link Flux} of converted objects.
 	 */
 	<T> Flux<T> tail(Query query, Class<T> entityClass, String collectionName);
+
+	/**
+	 * Subscribe to a MongoDB <a href="https://docs.mongodb.com/manual/changeStreams/">Change Streams</a> via the reactive
+	 * infrastructure. Use the optional provided {@link Aggregation} to filter events. The stream will not be completed
+	 * unless the {@link org.reactivestreams.Subscription} is {@link Subscription#cancel() canceled}.
+	 * <p />
+	 * The {@link ChangeStreamEvent#getBody()} is mapped to the {@literal resultType} while the
+	 * {@link ChangeStreamEvent#getRaw()} contains the unmodified payload.
+	 * <p />
+	 * Use {@link ChangeStreamOptions} to set arguments like {@link ChangeStreamOptions#getResumeToken() the resumseToken}
+	 * for resuming change streams.
+	 *
+	 * @param filter can be {@literal null}.
+	 * @param resultType must not be {@literal null}.
+	 * @param options must not be {@literal null}.
+	 * @param collectionName must not be {@literal null} nor empty.
+	 * @param <T>
+	 * @return
+	 * @since 2.1
+	 */
+	<T> Flux<ChangeStreamEvent<T>> changeStream(@Nullable Aggregation filter, Class<T> resultType,
+			ChangeStreamOptions options, String collectionName);
+
+	/**
+	 * Subscribe to a MongoDB <a href="https://docs.mongodb.com/manual/changeStreams/">Change Streams</a> via the reactive
+	 * infrastructure. Use the optional provided aggregation chain to filter events. The stream will not be completed
+	 * unless the {@link org.reactivestreams.Subscription} is {@link Subscription#cancel() canceled}.
+	 * <p />
+	 * The {@link ChangeStreamEvent#getBody()} is mapped to the {@literal resultType} while the
+	 * {@link ChangeStreamEvent#getRaw()} contains the unmodified payload.
+	 * <p />
+	 * Use {@link ChangeStreamOptions} to set arguments like {@link ChangeStreamOptions#getResumeToken() the resumseToken}
+	 * for resuming change streams.
+	 *
+	 * @param filter can be {@literal null}.
+	 * @param resultType must not be {@literal null}.
+	 * @param options must not be {@literal null}.
+	 * @param collectionName must not be {@literal null} nor empty.
+	 * @param <T>
+	 * @return
+	 * @since 2.1
+	 */
+	<T> Flux<ChangeStreamEvent<T>> changeStream(List<Document> filter, Class<T> resultType, ChangeStreamOptions options,
+			String collectionName);
 
 	/**
 	 * Returns the underlying {@link MongoConverter}.

@@ -13,13 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.springframework.data.mongodb.monitor;
+package org.springframework.data.mongodb.core;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+
+import org.springframework.data.mongodb.core.Message;
+import org.springframework.data.mongodb.core.MessageListener;
+import org.springframework.data.mongodb.core.Subscription;
 
 /**
  * Utilities for testing long running asnyc message retrieval.

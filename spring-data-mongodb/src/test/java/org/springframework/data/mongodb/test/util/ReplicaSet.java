@@ -90,7 +90,7 @@ public class ReplicaSet implements TestRule {
 		};
 	}
 
-	private boolean runsAsReplicaSet() {
+	public boolean runsAsReplicaSet() {
 
 		if (runsAsReplicaSet.get() == null) {
 

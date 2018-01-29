@@ -13,13 +13,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.springframework.data.mongodb.monitor;
+package org.springframework.data.mongodb.core;
+
+import org.springframework.dao.DataAccessResourceFailureException;
 
 /**
+ * Cancelable allows stopping long running tasks and freeing underlying resources.
+ *
  * @author Christoph Strobl
  * @since 2.1
  */
-interface Subscription extends Cancelable {
+interface Cancelable {
 
-	boolean isActive();
+	/**
+	 * Abort and free resources.
+	 *
+	 * @throws DataAccessResourceFailureException
+	 */
+	void cancel() throws DataAccessResourceFailureException;
 }

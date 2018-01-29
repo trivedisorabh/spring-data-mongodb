@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.springframework.data.mongodb.monitor;
+package org.springframework.data.mongodb.core;
 
 import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
@@ -28,14 +28,13 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.monitor.SubscriptionRequest.RequestOptions;
+import org.springframework.data.mongodb.core.SubscriptionRequest.RequestOptions;
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 import org.springframework.util.ErrorHandler;
 
 /**
- * Simple {@link Executor} based {@link MessageListenerContainer} implementation. <br />
+ * Simple {@link Executor} based {@link MessageListenerContainer} implementation.
  *
  * @author Christoph Strobl
  * @since 2.1
