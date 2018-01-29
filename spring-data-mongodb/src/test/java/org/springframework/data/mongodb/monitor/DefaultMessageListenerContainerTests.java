@@ -43,6 +43,7 @@ import org.springframework.util.ErrorHandler;
 import com.mongodb.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.CreateCollectionOptions;
+import com.mongodb.client.model.changestream.ChangeStreamDocument;
 
 /**
  * Integration tests for {@link DefaultMessageListenerContainer}.
@@ -146,26 +147,29 @@ public class DefaultMessageListenerContainerTests {
 
 	@Test // DATAMONGO-1803
 	@IfProfileValue(name = "replSet", value = "true")
-	public void startAndListenToChangeStreamOther() throws InterruptedException {
+	public void shouldStartReceivingMessagesWhenContainerStarts() throws InterruptedException {
 
 		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
-		container.register(new ChangeStreamRequest(System.out::println, () -> COLLECTION_NAME), Document.class);
+		Subscription subscription = container.register(new ChangeStreamRequest(messageListener, () -> COLLECTION_NAME),
+				Document.class);
 
 		collection.insertOne(new Document("_id", "id-1").append("value", "foo"));
 
-		Thread.sleep(1000);
+		Thread.sleep(200);
 
 		container.start();
 
-		Thread.sleep(500);
+		awaitSubscription(subscription);
 
-		collection.insertOne(new Document("_id", "id-2").append("value", "bar"));
+		Document expected = new Document("_id", "id-2").append("value", "bar");
+		collection.insertOne(expected);
 
-		Thread.sleep(1000);
+		awaitMessages(messageListener);
+
 		container.stop();
 
-		collection.insertOne(new Document("_id", "id-3").append("value", "bar"));
-		Thread.sleep(2000);
+		assertThat(messageListener.getMessages().stream().map(Message::getBody).collect(Collectors.toList()))
+				.containsExactly(expected);
 	}
 
 	@Test // DATAMONGO-1803
@@ -270,6 +274,38 @@ public class DefaultMessageListenerContainerTests {
 		} finally {
 			container.stop();
 		}
+	}
+
+	@Test // DATAMONGO-1803
+	@IfProfileValue(name = "replSet", value = "true")
+	public void runsMoreThanOneTaskAtOnce() throws InterruptedException {
+
+		dbFactory.getDb().createCollection(COLLECTION_NAME,
+				new CreateCollectionOptions().capped(true).maxDocuments(10000).sizeInBytes(10000));
+
+		MessageListenerContainer container = new DefaultMessageListenerContainer(template);
+		container.start();
+
+		CollectingMessageListener<Message> tailableListener = new CollectingMessageListener<>();
+		Subscription tailableSubscription = container
+				.register(new TailableCursorRequest(tailableListener, () -> COLLECTION_NAME), Document.class);
+
+		CollectingMessageListener<Message> changeStreamListener = new CollectingMessageListener<>();
+		Subscription changeStreamSubscription = container
+				.register(new ChangeStreamRequest(changeStreamListener, () -> COLLECTION_NAME), Document.class);
+
+		awaitSubscriptions(tailableSubscription, changeStreamSubscription);
+
+		collection.insertOne(new Document("_id", "id-1").append("value", "foo"));
+
+		awaitMessages(tailableListener);
+		awaitMessages(changeStreamListener);
+
+		assertThat(tailableListener.getTotalNumberMessagesReceived()).isEqualTo(1);
+		assertThat(tailableListener.getFirstMessage().getRaw()).isInstanceOf(Document.class);
+
+		assertThat(changeStreamListener.getTotalNumberMessagesReceived()).isEqualTo(1);
+		assertThat(changeStreamListener.getFirstMessage().getRaw()).isInstanceOf(ChangeStreamDocument.class);
 	}
 
 	@Data

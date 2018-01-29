@@ -20,6 +20,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.bson.BsonDocument;
 import org.bson.Document;
@@ -44,6 +45,7 @@ import org.springframework.util.ClassUtils;
 import org.springframework.util.ErrorHandler;
 
 import com.mongodb.CursorType;
+import com.mongodb.MongoNamespace;
 import com.mongodb.client.ChangeStreamIterable;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCursor;
@@ -377,9 +379,12 @@ class TaskFactory {
 		@Override
 		protected Message doCreateMessage(ChangeStreamDocument<Document> source, RequestOptions options) {
 
-			return new SimpleMessage(source, source.getFullDocument(),
-					MessageProperties.builder().databaseName(source.getNamespace().getDatabaseName())
-							.collectionName(source.getNamespace().getCollectionName()).build());
+			// namespace might be null for eg. OperationType.INVALIDATE
+			MongoNamespace namespace = Optional.ofNullable(source.getNamespace())
+					.orElse(new MongoNamespace("unknown", "unknown"));
+
+			return new SimpleMessage(source, source.getFullDocument(), MessageProperties.builder()
+					.databaseName(namespace.getDatabaseName()).collectionName(namespace.getCollectionName()).build());
 		}
 
 		static class PrefixingDelegatingAggregationOperationContext implements AggregationOperationContext {

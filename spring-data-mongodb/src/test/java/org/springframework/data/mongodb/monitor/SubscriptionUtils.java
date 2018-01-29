@@ -17,6 +17,8 @@ package org.springframework.data.mongodb.monitor;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -36,6 +38,39 @@ class SubscriptionUtils {
 	 */
 	static void awaitSubscription(Subscription subscription) throws InterruptedException {
 		awaitSubscription(subscription, DEFAULT_TIMEOUT);
+	}
+
+	/**
+	 * Wait for all {@link Subscription Subscriptions} to {@link Subscription#isActive() become active} but not longer
+	 * than {@link #DEFAULT_TIMEOUT}.
+	 *
+	 * @param subscription
+	 * @throws InterruptedException
+	 */
+	static void awaitSubscriptions(Subscription... subscriptions) throws InterruptedException {
+		awaitSubscriptions(DEFAULT_TIMEOUT, subscriptions);
+	}
+
+	/**
+	 * Wait for all {@link Subscription Subscriptions} to {@link Subscription#isActive() become active} but not longer
+	 * than {@literal timeout}.
+	 *
+	 * @param timeout
+	 * @param subscriptions
+	 * @throws InterruptedException
+	 */
+	static void awaitSubscriptions(Duration timeout, Subscription... subscriptions) throws InterruptedException {
+
+		long passedMs = 0;
+		long maxMs = timeout.toMillis();
+
+		Collection<Subscription> subscriptionList = Arrays.asList(subscriptions);
+
+		while (!subscriptionList.stream().allMatch(Subscription::isActive) && passedMs < maxMs) {
+
+			Thread.sleep(10);
+			passedMs += 10;
+		}
 	}
 
 	/**
@@ -130,7 +165,7 @@ class SubscriptionUtils {
 		}
 
 		public M getLastMessage() {
-			return messages.get(messages.size()-1);
+			return messages.get(messages.size() - 1);
 		}
 	}
 
